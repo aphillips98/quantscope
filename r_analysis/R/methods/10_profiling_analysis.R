@@ -113,18 +113,6 @@ analyze_profiling <- function(prof) {
                  prov = prov(n), width = 11, height = 7)
       }
 
-      save_ieee_copy <- function(fig_name) {
-        ieee_subdir <- CFG$figures$ieee$subdir %||% "ieee_format"
-        ieee_name <- sub("^figure[0-9]+[a-z]*_", "", fig_name)
-        src_pdf <- file.path(CFG$paths$figures_dir, ieee_subdir,
-                             paste0(ieee_name, ".pdf"))
-        if (!file.exists(src_pdf)) return(invisible(FALSE))
-        dst_dir <- file.path(CFG$paths$figures_dir, "ieee")
-        if (!dir.exists(dst_dir)) dir.create(dst_dir, recursive = TRUE)
-        file.copy(src_pdf, file.path(dst_dir, basename(src_pdf)), overwrite = TRUE)
-        invisible(TRUE)
-      }
-
       save_cache_hierarchy_arch_grid <- function(hier_df, fig_name,
                                                  subtitle,
                                                  md_lines = NULL) {
@@ -180,29 +168,17 @@ analyze_profiling <- function(prof) {
             axis.title.y = ggplot2::element_text(face = "bold",
                                                  margin = ggplot2::margin(r = 8))
           )
-        save_fig(p, fig_name, data = hier_df, prov = prov(n),
-                 width = 12.5, height = 8.5)
         if (!is.null(md_lines)) {
           writeLines(md_lines, file.path(CFG$paths$figures_dir,
                                          paste0(fig_name, ".md")))
         }
-        save_ieee_copy(fig_name)
+        save_fig(p, fig_name, data = hier_df, prov = prov(n),
+                 width = 12.5, height = 8.5)
       }
 
       ## All available CPU perf runs (existing Figure 21 behavior).
       hier <- build_hier_data(pw)
       save_cache_hierarchy(hier, "figure21_perf_cache_hierarchy")
-
-      ## Intel-only counterpart from GPU_CPU ZIP perf rows (or any Intel CPU rows).
-      intel_pw <- pw[
-        (!is.na(pw$cpu_arch) & as.character(pw$cpu_arch) == "Intel") |
-          (!is.na(pw$node) & grepl("GPU_CPU", as.character(pw$node), fixed = TRUE)),
-        ,
-        drop = FALSE
-      ]
-      hier_intel <- build_hier_data(intel_pw)
-      save_cache_hierarchy(hier_intel, "figure21_perf_cache_hierarchy_intel",
-               legend_top = TRUE, remove_legend_title = TRUE)
 
       hier_amd_intel <- build_hier_data(pw, arch_keep = arch_levels)
       save_cache_hierarchy_arch_grid(

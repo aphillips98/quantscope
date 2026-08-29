@@ -167,7 +167,7 @@ stats:
 # Figures
 # ---------------------------------------------------------------------------
 figures:
-  formats: ["png"]
+  formats: []
   dpi: 300
   # Also persist plot object (.rds) and underlying data (.csv) + provenance
   # sidecar (.json) next to every figure.
@@ -177,10 +177,10 @@ figures:
   pareto_minimize: ["exec_time_s", "total_energy_j"]  # Figure 3 frontier
   # IEEE-format vector copies. Same content/shape as the normal figures, only
   # re-rendered at IEEE column width with consistent 9-10 pt typography. Saved
-  # as vector PDF into the `ieee_format/` subdirectory of the figures dir.
+  # as vector PDF into the figures dir.
   ieee:
     enabled: true
-    subdir: "ieee_format"
+    subdir: ""
     width_in: 7.16          # IEEE two-column (full width) figures (182 mm)
     single_width_in: 3.5    # IEEE single-column width (21 pc) -- the DEFAULT for every figure
     double_column:

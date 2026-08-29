@@ -547,34 +547,6 @@ generate_figures <- function(metrics, stats_res, posthoc) {
              width = 12, height = 8.5, dpi = 300)
   }
 
-  ## ---- Figure 7: GPU generation energy by quantization (stacked panels) --
-  ## Three stacked panels (V100 top, A100 middle, H100 bottom); x = model,
-  ## y = total PSU energy, one point per quantization with 95% CI (GPU-only).
-  f7 <- fig_gpu_generation_energy_quant(metrics, energy = primary,
-                                        energy_label = lab(primary))
-  if (!is.null(f7$plot)) {
-    save_fig(f7$plot, "figure7_gpu_generation_energy_quant",
-             data = f7$data, prov = prov(nrow(f7$data)),
-             width = 11, height = 9.5, dpi = 300)
-    if (!is.null(f7$annot)) {
-      md <- c(
-        paste("#", f7$annot$title),
-        "",
-        "**Subtitle:**",
-        "",
-        f7$annot$subtitle,
-        "",
-        "**Caption:**",
-        "",
-        f7$annot$caption
-      )
-      md_path <- file.path(CFG$paths$figures_dir,
-                           "figure7_gpu_generation_energy_quant_legend.md")
-      writeLines(md, md_path)
-      message("  [md] ", basename(md_path))
-    }
-  }
-
   ## ---- Figure 5: Factor importance --------------------------------------
   if (!is.null(stats_res$importance) && nrow(stats_res$importance)) {
     f4 <- fig_factor_importance(stats_res$importance)

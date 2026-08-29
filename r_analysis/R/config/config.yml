@@ -1,0 +1,244 @@
+# =============================================================================
+# config.yml  --  Efimon DSE energy-characterization pipeline configuration
+# -----------------------------------------------------------------------------
+# Single source of truth for the redesigned R statistical framework. Every script
+# under R/ reads this file (via functions/helpers.R::load_config()). Edit values
+# here rather than hard-coding them in the scripts.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# I/O paths (relative to the r_analysis/ project root unless absolute)
+# ---------------------------------------------------------------------------
+paths:
+  input_dir:   "data"   # dir holding runs_wide.csv + samples_long.csv
+  results_dir: "results"       # exported CSV / RDS / JSON statistics
+  figures_dir: "figures"       # PNG + PDF figures (+ sidecar data)
+  tables_dir:  "tables"        # LaTeX / markdown tables
+  reports_dir: "R/reports"     # rendered analysis report
+
+# ---------------------------------------------------------------------------
+# Reproducibility
+# ---------------------------------------------------------------------------
+reproducibility:
+  seed: 20260707
+  # Software provenance stamped onto every figure and report. `auto` fields are
+  # filled at runtime (R version, package versions, date) when left null.
+  software_version: null       # null -> read from DESCRIPTION / sessionInfo
+  pipeline_version: "2.0.0"
+  llamacpp_version: null       # override if not present in the dataset
+  cuda_version: null
+
+# ---------------------------------------------------------------------------
+# Experimental design: factors and their ordered levels
+# ---------------------------------------------------------------------------
+design:
+  # Primary DSE factors used in ANOVA / main-effects / importance.
+  # `hardware` is the specific compute device (a repetition is one run of a given
+  # hardware x model x quant cell): the GPU arch for GPU runs, the CPU arch for
+  # CPU runs. It replaces the coarser exec_mode as the confirmatory factor.
+  factors: ["hardware", "model", "quant"]
+  # Additional blocking / faceting factors kept for descriptive + heatmap use.
+  facet_factors: ["exec_mode", "gpu_arch", "cpu_arch"]
+  # Repeated-measurement identifier (used to count repetitions per design cell).
+  replicate_id: "run_id"
+  levels:
+    quant:     ["Q2_K", "Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"]
+    model:     ["Phi-3.5-mini-3.8B", "Mistral-7B", "Llama-3.1-8B", "Gemma-2-9B"]
+    hardware:  ["AMD", "Intel", "V100", "A100", "H100"]
+    exec_mode: ["CPU", "GPU", "CPU-GPU"]
+    gpu_arch:  ["V100", "A100", "H100"]
+  # Drop the extra Q2_K level from the confirmatory analysis when true.
+  exclude_q2k: false
+  # Minimum replicates per non-empty design cell required to call it "balanced".
+  min_replicates: 2
+
+# ---------------------------------------------------------------------------
+# Experiment metadata carried through the pipeline (stamped on outputs). Columns
+# absent from the dataset are created as NA so the framework degrades gracefully.
+# ---------------------------------------------------------------------------
+metadata_fields:
+  - model
+  - quant
+  - exec_mode
+  - cpu_arch
+  - gpu_arch
+  - gpu_model
+  - prompt
+  - prompt_tokens
+  - generated_tokens
+  - context_size
+  - batch_size
+  - n_threads
+  - llamacpp_version
+  - cuda_version
+  - timestamp
+
+# ---------------------------------------------------------------------------
+# Metrics: the ONLY responses retained for the paper. Everything else is dropped
+# (unless diagnostics mode is enabled). `primary` drives the confirmatory models
+# and the six figures.
+# ---------------------------------------------------------------------------
+metrics:
+  primary: "total_energy_j"
+  keep:
+    - total_energy_j          # raw integral(P dt) on the PSU rail  [J]
+    - energy_adj_j            # baseline-adjusted PSU energy        [J]
+    - total_energy_socket_j   # raw integral(P dt) on the socket    [J]
+    - energy_adj_socket_j     # baseline-adjusted socket energy     [J]
+    - exec_time_s             # inference duration                  [s]
+    - avg_socket_power_w      # mean socket power                   [W]
+    - avg_psu_power_w         # mean PSU power                      [W]
+    - peak_socket_power_w     # peak socket power                   [W]
+    - peak_psu_power_w        # peak PSU power                      [W]
+    - tokens_per_sec          # generation throughput               [tok/s]
+    - energy_per_token_j      # energy efficiency                   [J/tok]
+    - tokens_per_joule        # energy efficiency                   [tok/J]
+    - avg_cpu_freq_mhz        # mean CPU frequency                  [MHz]
+    - avg_cpu_util_pct        # mean CPU utilization                [%]
+    - avg_gpu_util_pct        # mean GPU utilization (if available) [%]
+    - avg_gpu_power_w         # mean GPU power (if available)       [W]
+    - gpu_mem_util_pct        # GPU memory utilization (if avail.)  [%]
+  labels:
+    total_energy_j:        "Total energy [J]"
+    energy_adj_j:          "Baseline-adjusted energy [J]"
+    total_energy_socket_j: "Total socket energy [J]"
+    energy_adj_socket_j:   "Baseline-adjusted socket energy [J]"
+    exec_time_s:           "Execution time [s]"
+    avg_socket_power_w:    "Average socket power [W]"
+    avg_psu_power_w:       "Average PSU power [W]"
+    peak_socket_power_w:   "Peak socket power [W]"
+    peak_psu_power_w:      "Peak PSU power [W]"
+    tokens_per_sec:        "Throughput [tok/s]"
+    energy_per_token_j:    "Energy per token [J/tok]"
+    tokens_per_joule:      "Tokens per joule [tok/J]"
+    avg_cpu_freq_mhz:      "Average CPU frequency [MHz]"
+    avg_cpu_util_pct:      "Average CPU utilization [%]"
+    avg_gpu_util_pct:      "Average GPU utilization [%]"
+    avg_gpu_power_w:       "Average GPU power [W]"
+    gpu_mem_util_pct:      "GPU memory utilization [%]"
+
+# ---------------------------------------------------------------------------
+# Energy integration
+# ---------------------------------------------------------------------------
+energy:
+  # "trapezoid" (recommended) or "riemann". Energy is ALWAYS integral(P dt),
+  # never a bare sum of power samples.
+  method: "trapezoid"
+  # Rail used as the whole-system energy response.
+  system_rail: "psu"          # psu | socket
+  # Recompute energy in R from samples_long.csv when raw samples are available;
+  # otherwise trust the pre-integrated values in runs_wide.csv.
+  # NOTE: samples_long.csv is a coarse, down-sampled whole-node trace (~3 pts/run)
+  # shared across concurrent runs, so re-integrating it collapses every run to the
+  # same value. The ETL's per-run energy_psu_j / energy_socket_j are proper,
+  # full-resolution integral(P dt) values -- trust those instead.
+  recompute_from_samples: false
+  # Which duration fills exec_time_s (the response used for throughput/time):
+  #   "efimon" (default) -> efimon_time_s, the summed sampling window.
+  #   "llama"            -> llama_total_time_s, llama.cpp's authoritative total
+  #                         wall time (recommended for short GPU runs where the
+  #                         efimon window is load-dominated / cadence-quantized).
+  # Falls back to the efimon window when the llama timing is unavailable. Energy
+  # and power columns remain efimon-integral based regardless of this choice.
+  time_source: "llama"        # efimon | llama
+
+# ---------------------------------------------------------------------------
+# Statistics
+# ---------------------------------------------------------------------------
+stats:
+  alpha: 0.05
+  anova_type: 2               # Type-II sums of squares (car::Anova / base fallback)
+  # Assumption thresholds; if violated the pipeline switches to Kruskal-Wallis.
+  normality_test: "shapiro"
+  homogeneity_test: "levene"
+  bootstrap:
+    enabled: true
+    n_resamples: 2000
+    conf_level: 0.90
+  correlation:
+    method: "pearson"         # Pearson r for the runtime-metric matrix
+    hide_below_abs_r: 0.30    # blank/annotate only cells with |r| >= threshold (Figure 4)
+    cluster: false            # keep the fixed runtime ordering below (no clustering)
+    # Curated runtime metrics shown in Figure 4 (order = axis order).
+    variables: ["total_energy_j", "exec_time_s", "tokens_per_joule",
+                "avg_psu_power_w", "avg_cpu_freq_mhz", "avg_cpu_util_pct"]
+
+# ---------------------------------------------------------------------------
+# Figures
+# ---------------------------------------------------------------------------
+figures:
+  formats: ["png"]
+  dpi: 300
+  # Also persist plot object (.rds) and underlying data (.csv) + provenance
+  # sidecar (.json) next to every figure.
+  save_data: true
+  width_in: 7.5
+  height_in: 5.0
+  pareto_minimize: ["exec_time_s", "total_energy_j"]  # Figure 3 frontier
+  # IEEE-format vector copies. Same content/shape as the normal figures, only
+  # re-rendered at IEEE column width with consistent 9-10 pt typography. Saved
+  # as vector PDF into the `ieee_format/` subdirectory of the figures dir.
+  ieee:
+    enabled: true
+    subdir: "ieee_format"
+    width_in: 7.16          # IEEE two-column (full width) figures (182 mm)
+    single_width_in: 3.5    # IEEE single-column width (21 pc) -- the DEFAULT for every figure
+    double_column:
+      - perf_cache_hierarchy_amd_intel
+      - perf_cache_hierarchy_amd_intel_focus_models
+    # figures rendered at two-column (full) width instead (by
+                            #   descriptive name); every other figure is single-column
+    font_type: "Times"       # typography type/family: "sans", "serif" or "Times" (-> serif)
+    font_size: 7            # typography base size in points (IEEE 9-10 pt)
+    base_size: 7            # legacy alias for font_size (font_size takes precedence)
+    family: "Times"          # legacy alias for font_type (font_type takes precedence)
+    dpi: 600                # for any embedded raster; line art >= 600 dpi
+    point_scale: 0.45       # shrink point markers (squares/triangles/circles) only
+    point_stroke: 0.35      # marker border thickness (lower = thinner outline)
+    legend_point_scale: 0.45 # scale legend key markers (used if legend_point_size unset)
+    legend_point_size: 0.8  # absolute legend key marker size -> equal on all IEEE figures
+    single_legend_nrow: 3   # rows to wrap wide legends onto on single-column figures
+    single_row_legend:      # figures whose legend(s) stay on ONE horizontal row (no wrap)
+      - energy_vs_throughput_split
+      - energy_vs_throughput_raw
+      - energy_vs_throughput_pareto
+      - energy_vs_throughput_raw_pareto
+      - cpu_energy_by_model_quant_log
+      - gpu_energy_by_model_quant_linear_ci50
+      - model_throughput_by_quant_combined_log
+      - nsight_transfer_bandwidth_combined_log
+      - model_throughput_by_quant_split
+      - nsight_kernel_runtime_gpu
+      - nsight_kernel_runtime_gpu_linear
+      - nsight_kernel_runtime_gpu_log
+      - perf_cache_miss_levels
+      - nsight_transfer_bandwidth
+    two_row_legend:         # figures whose wide legend wraps onto TWO rows (not 3)
+      - quant_throughput_cpu_gpu_models_split
+      - quant_energy_cpu_gpu_models_split
+      - quant_energy_cpu_gpu_models_combined_linear
+      - quant_energy_cpu_gpu_models_combined_log
+      - nsight_kernel_time_by_gpu_model_grid
+      - nsight_transfer_bandwidth_combined_log
+    single_xlabel_maxchar: 5 # x tick labels longer than this get wrapped (or rotated)
+    single_xlabel_wrap: true       # true = wrap long x labels onto short lines; false = rotate
+    single_xlabel_wrap_width: 9    # target characters per line when wrapping x labels
+    single_xlabel_angle: 30        # rotation angle used only when single_xlabel_wrap is false
+    top_legend:             # figures whose legend is moved to the TOP of the plot
+      - perf_cache_hierarchy
+      - nsight_kernel_time_abs_by_model
+      - cpu_energy_by_model_quant_log
+      - gpu_energy_by_model_quant_linear_ci50
+      - model_throughput_by_quant_combined_log
+      - nsight_kernel_time_by_gpu_model_grid
+      - nsight_transfer_bandwidth_combined_log
+    inside_legend_pos: [0.99, 0.99]   # x,y in [0,1] panel coords for the inside legend
+    inside_legend_just: ["right", "top"] # anchor corner of the inside legend box
+
+# ---------------------------------------------------------------------------
+# Diagnostics (supplementary material only). When false, the pipeline SKIPS all
+# power histograms, KDE / distribution plots, fan-speed plots, frequency
+# histograms, Q-Q plots and residual plots. Enable with --diagnostics.
+# ---------------------------------------------------------------------------
+diagnostics:
+  enabled: false

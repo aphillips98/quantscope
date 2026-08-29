@@ -76,9 +76,9 @@ load_config <- function(config_path, project_root) {
 
 .default_config <- function() {
   list(
-    paths = list(input_dir = "efimon_data", results_dir = "results",
-                 figures_dir = "figures", tables_dir = "tables",
-                 reports_dir = "R/reports"),
+    paths = list(input_dir = "data", results_dir = "results/numerical_data",
+                 figures_dir = "results/figures", tables_dir = "results/tables",
+                 reports_dir = "results"),
     reproducibility = list(seed = 20260707, pipeline_version = "2.0.0",
                            software_version = NULL),
     design = list(factors = c("hardware", "model", "quant"),

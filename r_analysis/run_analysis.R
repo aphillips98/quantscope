@@ -4,7 +4,7 @@
 ## pipeline. Sources the function modules and the numbered stage scripts, then
 ## runs them end to end: the energy analysis (stages 00-08) followed by the
 ## Nsight + perf profiling analysis (stages 09-10). Configuration lives in
-## R/config/config.yml; CLI flags override the most common options.
+## config.yml; CLI flags override the most common options.
 ##
 ## The profiling stages consume the CSVs produced by the ETL; run it
 ## once beforehand (they are skipped gracefully if its output is absent):
@@ -14,9 +14,9 @@
 ##   Rscript run_analysis.R [--config FILE] [--input DIR] [--outdir DIR]
 ##                          [--diagnostics] [--no-q2k]
 ##
-##   --config FILE   path to config.yml         (default: R/config/config.yml)
+##   --config FILE   path to config.yml         (default: config.yml)
 ##   --input DIR     dir with runs_wide.csv + samples_long.csv (overrides config)
-##   --outdir DIR    base dir for results/figures/tables/reports (overrides config)
+##   --outdir DIR    base dir for numerical_data/figures/tables/report (overrides config)
 ##   --diagnostics   also emit supplementary distribution / Q-Q / residual plots
 ##   --no-q2k        exclude the Q2_K quantization level
 ##   --time-source S duration for exec_time_s: efimon (default) | llama
@@ -35,6 +35,7 @@ get_opt <- function(flag, default = NULL) {
 this_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
 root <- if (length(this_file)) normalizePath(dirname(this_file)) else getwd()
 r_dir <- file.path(root, "R")
+methods_dir <- file.path(r_dir, "methods")
 
 ## Source function modules (helpers first -- it defines load_dependencies/config).
 for (f in c("helpers", "energy", "statistics", "anova", "tukey", "plots",
@@ -44,14 +45,15 @@ for (f in c("helpers", "energy", "statistics", "anova", "tukey", "plots",
 load_dependencies()
 
 ## Load configuration and apply CLI overrides.
-config_path <- get_opt("--config", file.path(r_dir, "config", "config.yml"))
+config_path <- get_opt("--config", file.path(root, "config.yml"))
 load_config(config_path, project_root = root)
 if (!is.null(get_opt("--input")))  CFG$paths$input_dir <- normalizePath(get_opt("--input"), mustWork = FALSE)
 if (!is.null(get_opt("--outdir"))) {
   base <- normalizePath(get_opt("--outdir"), mustWork = FALSE)
-  CFG$paths$results_dir <- file.path(base, "results")
+  CFG$paths$results_dir <- file.path(base, "numerical_data")
   CFG$paths$figures_dir <- file.path(base, "figures")
   CFG$paths$tables_dir  <- file.path(base, "tables")
+  CFG$paths$reports_dir <- base
 }
 if (isTRUE(get_opt("--diagnostics"))) CFG$diagnostics$enabled <- TRUE
 if (isTRUE(get_opt("--no-q2k")))      CFG$design$exclude_q2k  <- TRUE
@@ -64,7 +66,7 @@ stages <- sprintf("%02d_%s.R", 0:10,
     "statistical_analysis", "posthoc_analysis", "generate_figures",
     "generate_tables", "render_report",
     "profiling_import", "profiling_analysis"))
-for (s in stages) source(file.path(r_dir, s))
+  for (s in stages) source(file.path(methods_dir, s))
 
 message("==== Efimon DSE analysis pipeline (v",
         CFG$reproducibility$pipeline_version %||% "2.0.0", ") ====")

@@ -11,10 +11,10 @@
 # ---------------------------------------------------------------------------
 paths:
   input_dir:   "data"   # dir holding runs_wide.csv + samples_long.csv
-  results_dir: "results"       # exported CSV / RDS / JSON statistics
-  figures_dir: "figures"       # PNG + PDF figures (+ sidecar data)
-  tables_dir:  "tables"        # LaTeX / markdown tables
-  reports_dir: "R/reports"     # rendered analysis report
+  results_dir: "results/numerical_data" # exported CSV / RDS / JSON statistics
+  figures_dir: "results/figures"        # PNG + PDF figures (+ sidecar data)
+  tables_dir:  "results/tables"         # LaTeX / markdown tables
+  reports_dir: "results"                # rendered analysis report
 
 # ---------------------------------------------------------------------------
 # Reproducibility

@@ -35,6 +35,7 @@ Pure standard library plus a subprocess call to ``nsys``; no third-party deps.
 """
 
 import argparse
+import collections
 import csv
 import glob
 import math
@@ -66,9 +67,18 @@ PROF_FNAME_RE = re.compile(
     r"rep(?P<rep>\d+)_(?P<date>\d{8})_(?P<time>\d{6})_(?P<pid>\d+)"
 )
 
-# nsys stats reports we request and the "count" column header each one uses.
-NSYS_REPORTS = ("gpukernsum", "cudaapisum", "gpumemtimesum",
-                "gpumemsizesum", "osrtsum")
+# Internal key -> nsys report name per naming scheme, modern first. Nsight
+# Systems renamed every report (gpukernsum -> cuda_gpu_kern_sum, ...) and
+# dropped the legacy aliases in 2025+, so both spellings must be attempted.
+NSYS_REPORTS = collections.OrderedDict((
+    # gb_sum matches legacy gpukernsum granularity (grouped by grid/block too).
+    ("gpukernsum", ("cuda_gpu_kern_gb_sum", "gpukernsum")),
+    ("cudaapisum", ("cuda_api_sum", "cudaapisum")),
+    ("gpumemtimesum", ("cuda_gpu_mem_time_sum", "gpumemtimesum")),
+    ("gpumemsizesum", ("cuda_gpu_mem_size_sum", "gpumemsizesum")),
+    ("osrtsum", ("osrt_sum", "osrtsum")),
+))
+NSYS_NAMING_SCHEMES = (0, 1)
 
 
 def parse_prof_name(fname):
@@ -208,31 +218,42 @@ def parse_perf_stat(path):
 # ---------------------------------------------------------------------------
 # Nsight (nsys stats) parsing
 # ---------------------------------------------------------------------------
-def run_nsys_stats(sqlite_path, nsys_bin, tmp_root):
-    """Run ``nsys stats`` for all reports; return {report: [dict rows]} or {}."""
+def _run_nsys_stats_scheme(sqlite_path, nsys_bin, tmp_root, scheme):
+    """Run ``nsys stats`` using one report-naming scheme; return {key: rows}."""
     stem = os.path.splitext(os.path.basename(sqlite_path))[0]
     out_base = os.path.join(tmp_root, stem)
     cmd = [nsys_bin, "stats"]
-    for rep in NSYS_REPORTS:
-        cmd += ["-r", rep]
+    for variants in NSYS_REPORTS.values():
+        cmd += ["-r", variants[scheme]]
     cmd += ["--format", "csv", "-o", out_base, sqlite_path]
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
-    except (subprocess.CalledProcessError, OSError) as exc:
-        sys.stderr.write("  [nsys] failed on %s: %s\n"
-                         % (os.path.basename(sqlite_path), exc))
+    except (subprocess.CalledProcessError, OSError):
         return {}
 
+    # nsys exits 0 even when a report name is unknown, so presence of the CSV
+    # is the only reliable signal that the scheme is supported.
     out = {}
-    for rep in NSYS_REPORTS:
-        csv_path = "%s_%s.csv" % (out_base, rep)
+    for key, variants in NSYS_REPORTS.items():
+        csv_path = "%s_%s.csv" % (out_base, variants[scheme])
         if not os.path.exists(csv_path):
             continue
         with open(csv_path, newline="") as fh:
-            out[rep] = list(csv.DictReader(fh))
+            out[key] = list(csv.DictReader(fh))
         os.remove(csv_path)
     return out
+
+
+def run_nsys_stats(sqlite_path, nsys_bin, tmp_root):
+    """Run ``nsys stats`` for all reports; return {report: [dict rows]} or {}."""
+    for scheme in NSYS_NAMING_SCHEMES:
+        reports = _run_nsys_stats_scheme(sqlite_path, nsys_bin, tmp_root, scheme)
+        if reports:
+            return reports
+    sys.stderr.write("  [nsys] no reports produced for %s\n"
+                     % os.path.basename(sqlite_path))
+    return {}
 
 
 def _f(row, key):
@@ -247,6 +268,13 @@ def _f(row, key):
         return float(v)
     except ValueError:
         return math.nan
+
+
+# Newer Nsight Systems spells memcpy directions out; the R layer greps HtoD/DtoH.
+def _normalize_op(operation):
+    return (operation.replace("Host-to-Device", "HtoD")
+                     .replace("Device-to-Host", "DtoH")
+                     .replace("Device-to-Device", "DtoD"))
 
 
 def summarize_nsight(reports):
@@ -270,13 +298,13 @@ def summarize_nsight(reports):
 
     def mem_time(op):
         for r in memt:
-            if op in r.get("Operation", ""):
+            if op in _normalize_op(r.get("Operation", "")):
                 return _f(r, "Total Time (ns)")
         return math.nan
 
     def mem_size(op):
         for r in mems:
-            if op in r.get("Operation", ""):
+            if op in _normalize_op(r.get("Operation", "")):
                 return _f(r, "Total (MB)")
         return math.nan
 
@@ -449,10 +477,10 @@ def process_run_dir(run_dir, nsys_bin, tmp_root, do_perf, do_nsight, tables):
                 tables["osrt"].append(row)
 
             # merge time + size memory reports keyed on Operation
-            size_by_op = {r.get("Operation", ""): r
+            size_by_op = {_normalize_op(r.get("Operation", "")): r
                           for r in reports.get("gpumemsizesum", [])}
             for r in reports.get("gpumemtimesum", []):
-                op = r.get("Operation", "")
+                op = _normalize_op(r.get("Operation", ""))
                 sz = size_by_op.get(op, {})
                 row = dict(base); row.update({
                     "operation": op,

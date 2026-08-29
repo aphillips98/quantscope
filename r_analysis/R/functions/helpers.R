@@ -240,8 +240,7 @@ write_result <- function(df, name) {
   invisible(base)
 }
 
-## Save a figure to every configured raster/vector format, plus its underlying
-## data (.csv) written into the `csv_files/` subdirectory of figures_dir.
+## Save a figure to every configured raster/vector format.
 save_fig <- function(plot, name, data = NULL, prov = provenance(),
                      width = CFG$figures$width_in, height = CFG$figures$height_in,
                      dpi = CFG$figures$dpi %||% 300, caption = FALSE) {
@@ -267,7 +266,7 @@ save_fig <- function(plot, name, data = NULL, prov = provenance(),
       ggplot2::theme(plot.caption = ggplot2::element_text(
         size = 7, colour = "grey40", hjust = 1))
   }
-  for (fmt in (CFG$figures$formats %||% c("png", "pdf"))) {
+  for (fmt in (CFG$figures$formats %||% character(0))) {
     dev <- if (identical(fmt, "pdf")) grDevices::cairo_pdf else NULL
     suppressMessages(ggplot2::ggsave(
       filename = paste0(base, ".", fmt), plot = plot,
@@ -281,7 +280,7 @@ save_fig <- function(plot, name, data = NULL, prov = provenance(),
   ## the physical width (height kept proportional to preserve the aspect ratio).
   ie <- CFG$figures$ieee
   if (isTRUE(ie$enabled) && inherits(plot, "ggplot")) {
-    ieee_dir <- file.path(CFG$paths$figures_dir, ie$subdir %||% "ieee_format")
+    ieee_dir <- if (!is.null(ie$subdir) && nzchar(ie$subdir)) file.path(CFG$paths$figures_dir, ie$subdir) else CFG$paths$figures_dir
     if (!dir.exists(ieee_dir)) dir.create(ieee_dir, recursive = TRUE)
     ## Descriptive name (figure-number prefix stripped) also used to look up the
     ## per-figure single-column list and for the output filename.
@@ -657,6 +656,9 @@ save_fig <- function(plot, name, data = NULL, prov = provenance(),
     }
     if (length(ieee_md))
       writeLines(ieee_md, file.path(ieee_dir, paste0(ieee_name, ".md")))
+    for (f in c(paste0(base, "_legend.md"), paste0(base, ".md"))) {
+      if (file.exists(f)) unlink(f)
+    }
     ## Long categorical x tick labels (e.g. model names) do not fit horizontally
     ## on the narrow single-column width. By DEFAULT they are wrapped onto a few
     ## short lines (no rotation); set `single_xlabel_wrap: false` to rotate them
@@ -750,17 +752,6 @@ save_fig <- function(plot, name, data = NULL, prov = provenance(),
       filename = file.path(ieee_dir, paste0(ieee_name, ".pdf")), plot = ieee_plot,
       width = ieee_w, height = ieee_h, units = "in",
       dpi = ie$dpi %||% 600, device = grDevices::cairo_pdf, bg = "white"))
-  }
-  if (isTRUE(CFG$figures$save_data)) {
-    if (!is.null(data)) {
-      csv_dir <- file.path(CFG$paths$figures_dir, "csv_files")
-      if (!dir.exists(csv_dir)) dir.create(csv_dir, recursive = TRUE)
-      utils::write.csv(data, file.path(csv_dir, paste0(name, ".csv")),
-                       row.names = FALSE)
-    } else {
-      warning(sprintf("save_fig('%s'): no data supplied -- CSV not written.",
-                      name), call. = FALSE)
-    }
   }
   message(sprintf("  [fig] %s", name))
   invisible(base)

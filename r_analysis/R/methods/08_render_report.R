@@ -87,23 +87,18 @@ render_report <- function(metrics, design, stats_res, posthoc) {
   ## Figures.
   add("## Figures")
   add("")
-  figs <- c(
-    figure1_energy_vs_performance = "Energy vs execution-time trade-off with the Pareto frontier.",
-    figure2_main_effects = "Main effects of execution mode, model and quantization on total energy (EMM +/- 95% CI).",
-    figure3_gpu_arch_energy = "GPU architecture and quantization effect on total PSU energy (mean +/- 95% CI).",
-    figure4_gpu_arch_throughput = "GPU architecture and quantization effect on throughput (mean +/- 95% CI).",
-    figure5_factor_importance = "Factor importance across ANOVA, random forest and standardized regression.",
-    figure6_energy_drivers = "Energy associations with execution time and average power.",
-    figure7_tokens_per_joule = "Energy-efficiency heatmap of tokens per joule (model x quantization, faceted by GPU architecture).",
-    figure8_model_quant_interaction = "Model x quantization interaction on total energy.",
-    figure9_posthoc_forest = "Significant Tukey HSD pairwise comparisons (forest plot).",
-    figure10_correlation_matrix = "Clustered lower-triangle correlation matrix of runtime metrics (weak correlations hidden).",
-    figure11_design_heatmap = "Design-space heatmap of mean total energy (model x quantization, faceted by GPU architecture).")
-  for (nm in names(figs)) {
-    png <- file.path(CFG$paths$figures_dir, paste0(nm, ".png"))
-    if (file.exists(png))
-      add(sprintf("![%s](%s)\n\n*%s*\n", nm,
-                  normalizePath(png, mustWork = FALSE), figs[[nm]]))
+  ieee_dir <- if (!is.null(CFG$figures$ieee$subdir) && nzchar(CFG$figures$ieee$subdir))
+    file.path(CFG$paths$figures_dir, CFG$figures$ieee$subdir) else CFG$paths$figures_dir
+  if (dir.exists(ieee_dir)) {
+    pdfs <- list.files(ieee_dir, pattern = "\\.pdf$", full.names = TRUE)
+    for (pdf_path in sort(pdfs)) {
+      fig_name <- sub("\\.pdf$", "", basename(pdf_path))
+      md_path  <- file.path(ieee_dir, paste0(fig_name, ".md"))
+      desc <- if (file.exists(md_path)) {
+        paste(readLines(md_path, warn = FALSE), collapse = " ")
+      } else fig_name
+      add(sprintf("- [%s](%s)\n\n  *%s*\n", fig_name, pdf_path, desc))
+    }
   }
 
   out <- file.path(CFG$paths$reports_dir, "analysis_report.md")

@@ -25,6 +25,9 @@ Examples
   # Build everything from a directory of zips
   python3 etl/build_dataset.py --input ../efimon_data/second_batch --outdir data
 
+  # Download dataset from Zenodo (record ID, DOI or URL) and build everything
+  python3 etl/build_dataset.py --download-zenodo 12345678 --outdir data
+
   # Same, letting --outdir default to r_analysis/data
   python3 etl/build_dataset.py --input ../efimon_data/second_batch
 """
@@ -33,9 +36,15 @@ import argparse
 import csv
 import datetime
 import glob
+import json
 import os
+import re
 import shutil
 import sys
+import tempfile
+import urllib.error
+import urllib.request
+import zipfile
 from collections import Counter, OrderedDict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -196,16 +205,154 @@ def write_dataset_summary(input_dir, outdir):
     return out_path
 
 
+def _download_file(url, dest_path):
+    sys.stderr.write("  Downloading %s...\n" % os.path.basename(dest_path))
+    req = urllib.request.Request(url, headers={"User-Agent": "quantscope-etl/1.0"})
+    last_pct = [-1]
+
+    def _progress(block_num, block_size, total_size):
+        if total_size > 0:
+            pct = int((block_num * block_size * 100) / total_size)
+            if pct != last_pct[0] and pct % 10 == 0:
+                last_pct[0] = pct
+                sys.stderr.write("    Progress: %d%%\r" % pct)
+
+    try:
+        urllib.request.urlretrieve(url, dest_path, reporthook=_progress)
+        sys.stderr.write("    Completed: %s\n" % os.path.basename(dest_path))
+    except Exception as err:
+        sys.stderr.write("    Failed downloading %s: %s\n" % (url, err))
+        raise
+
+
+def _merge_into(src_dir, target_dir):
+    """Move everything under ``src_dir`` into ``target_dir``, flattening a lone wrapper dir."""
+    entries = os.listdir(src_dir)
+    if len(entries) == 1 and os.path.isdir(os.path.join(src_dir, entries[0])):
+        src_dir = os.path.join(src_dir, entries[0])
+        entries = os.listdir(src_dir)
+    for name in entries:
+        dest = os.path.join(target_dir, name)
+        if os.path.isdir(dest):
+            shutil.rmtree(dest)
+        elif os.path.exists(dest):
+            os.remove(dest)
+        shutil.move(os.path.join(src_dir, name), dest)
+
+
+def _unpack_into(file_path, target_dir):
+    """Extract ``file_path`` into ``target_dir``; per-run llamacpp zips are left alone."""
+    if not zipfile.is_zipfile(file_path) or \
+            os.path.basename(file_path).startswith("llamacpp_"):
+        shutil.move(file_path, os.path.join(target_dir, os.path.basename(file_path)))
+        return
+    sys.stderr.write("  Extracting archive %s -> %s...\n" % (
+        os.path.basename(file_path), target_dir))
+    staging = tempfile.mkdtemp(prefix="zenodo_unpack_")
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            zf.extractall(staging)
+        _merge_into(staging, target_dir)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def download_from_zenodo(record_or_url, target_dir):
+    """Download dataset archive(s) from a Zenodo record ID, DOI, or URL.
+
+    Archives are downloaded to a temporary directory and their contents are
+    extracted directly into ``target_dir`` (no intermediate download folder).
+
+    Parameters
+    ----------
+    record_or_url : str
+        Zenodo record ID (e.g. '12345678'), DOI (e.g. '10.5281/zenodo.12345678'),
+        record URL (e.g. 'https://zenodo.org/records/12345678'), or direct file URL.
+    target_dir : str
+        Destination directory where the archive contents end up.
+    """
+    os.makedirs(target_dir, exist_ok=True)
+    sys.stderr.write("== Downloading from Zenodo ==\n")
+    sys.stderr.write("  Target directory: %s\n" % os.path.abspath(target_dir))
+
+    tmp_dir = tempfile.mkdtemp(prefix="zenodo_dl_")
+    try:
+        # Direct file URL case.
+        if (record_or_url.startswith("http://") or record_or_url.startswith("https://")) and \
+                ("/files/" in record_or_url and not record_or_url.endswith("/files")):
+            filename = os.path.basename(record_or_url.split("?")[0])
+            dest_path = os.path.join(tmp_dir, filename)
+            _download_file(record_or_url, dest_path)
+            _unpack_into(dest_path, target_dir)
+            return
+
+        # Extract record ID using regex matching numeric sequence
+        match = re.search(r"zenodo(?:\.org)?/(?:records?|api/records)/?(\d+)", record_or_url)
+        if not match:
+            match = re.search(r"(\d{6,10})", record_or_url)
+
+        if not match:
+            raise ValueError("Could not parse Zenodo record ID or URL from: %s" % record_or_url)
+
+        record_id = match.group(1)
+        api_url = "https://zenodo.org/api/records/%s" % record_id
+        sys.stderr.write("  Fetching metadata for Zenodo record %s...\n" % record_id)
+
+        req = urllib.request.Request(api_url, headers={"User-Agent": "quantscope-etl/1.0"})
+        try:
+            with urllib.request.urlopen(req) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.URLError as err:
+            raise RuntimeError("Failed to fetch Zenodo record metadata (%s): %s" % (api_url, err))
+
+        files = data.get("files", [])
+        if not files:
+            sys.stderr.write("  Warning: No files found in Zenodo record %s\n" % record_id)
+            return
+
+        sys.stderr.write("  Found %d file(s) in record %s\n" % (len(files), record_id))
+        for f in files:
+            links = f.get("links", {})
+            download_url = links.get("self") or links.get("content") or f.get("download_link")
+            filename = f.get("key") or f.get("filename")
+            if not download_url or not filename:
+                continue
+
+            dest_path = os.path.join(tmp_dir, filename)
+            _download_file(download_url, dest_path)
+            _unpack_into(dest_path, target_dir)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _resolve_input_dir(input_dir):
+    """If input_dir contains a 'data' subdirectory or single nested directory, return that subdirectory."""
+    if not input_dir or not os.path.isdir(input_dir):
+        return input_dir
+    data_sub = os.path.join(input_dir, "data")
+    if os.path.isdir(data_sub):
+        return data_sub
+    subdirs = [os.path.join(input_dir, d) for d in os.listdir(input_dir)
+               if os.path.isdir(os.path.join(input_dir, d))]
+    if len(subdirs) == 1 and os.path.isdir(subdirs[0]):
+        return subdirs[0]
+    return input_dir
+
+
 def main(argv=None):
     default_out = os.path.normpath(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "data"))
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--input", required=True,
+    p.add_argument("--input", default=None,
                    help="directory holding the llamacpp_*.zip run archives "
                         "(scanned recursively; each zip carries both energy and "
                         "profiling data)")
+    p.add_argument("--download-zenodo", "--zenodo", metavar="RECORD_ID_OR_URL",
+                   nargs="?", const="", default=None,
+                   help="download the dataset archive(s) from a Zenodo record ID, DOI or "
+                        "URL and extract their contents directly into --outdir")
     p.add_argument("--outdir", default=default_out,
                    help="output dir for every tidy CSV (default: r_analysis/data)")
     p.add_argument("--nsys", default=shutil.which("nsys") or "nsys",
@@ -222,6 +369,17 @@ def main(argv=None):
                         "time is always kept in efimon_time_s.")
 
     args = p.parse_args(argv)
+
+    if not args.input and not args.download_zenodo:
+        p.error("one of --input or --download-zenodo RECORD_ID_OR_URL is required")
+
+    if args.download_zenodo is not None:
+        if args.download_zenodo == "":
+            p.error("--download-zenodo requires a Zenodo record ID, DOI, or URL (e.g. --download-zenodo 12345678)")
+        download_from_zenodo(args.download_zenodo, args.outdir)
+        args.input = args.outdir
+    else:
+        args.input = _resolve_input_dir(args.input)
 
     if not os.path.isdir(args.input):
         p.error("--input %r is not a directory" % args.input)

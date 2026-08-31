@@ -183,9 +183,7 @@ figures:
     subdir: ""
     width_in: 7.16          # IEEE two-column (full width) figures (182 mm)
     single_width_in: 3.5    # IEEE single-column width (21 pc) -- the DEFAULT for every figure
-    double_column:
-      - perf_cache_hierarchy_amd_intel
-      - perf_cache_hierarchy_amd_intel_focus_models
+    double_column: []
     # figures rendered at two-column (full) width instead (by
                             #   descriptive name); every other figure is single-column
     font_type: "Times"       # typography type/family: "sans", "serif" or "Times" (-> serif)
@@ -199,39 +197,29 @@ figures:
     legend_point_size: 0.8  # absolute legend key marker size -> equal on all IEEE figures
     single_legend_nrow: 3   # rows to wrap wide legends onto on single-column figures
     single_row_legend:      # figures whose legend(s) stay on ONE horizontal row (no wrap)
-      - energy_vs_throughput_split
-      - energy_vs_throughput_raw
       - energy_vs_throughput_pareto
-      - energy_vs_throughput_raw_pareto
-      - cpu_energy_by_model_quant_log
-      - gpu_energy_by_model_quant_linear_ci50
-      - model_throughput_by_quant_combined_log
-      - nsight_transfer_bandwidth_combined_log
-      - model_throughput_by_quant_split
-      - nsight_kernel_runtime_gpu
-      - nsight_kernel_runtime_gpu_linear
-      - nsight_kernel_runtime_gpu_log
+      - cpu_energy_by_model_log
+      - throughput_by_model_execmode_log
+      - gpu_transfer_bandwidth_log
+      - gpu_kernel_runtime_linear
+      - gpu_kernel_runtime_log
       - perf_cache_miss_levels
-      - nsight_transfer_bandwidth
     two_row_legend:         # figures whose wide legend wraps onto TWO rows (not 3)
-      - quant_throughput_cpu_gpu_models_split
-      - quant_energy_cpu_gpu_models_split
-      - quant_energy_cpu_gpu_models_combined_linear
-      - quant_energy_cpu_gpu_models_combined_log
-      - nsight_kernel_time_by_gpu_model_grid
-      - nsight_transfer_bandwidth_combined_log
+      - energy_by_model_execmode_linear
+      - energy_by_model_execmode_log
+      - gpu_kernel_time_by_model_gpu
+      - gpu_transfer_bandwidth_log
     single_xlabel_maxchar: 5 # x tick labels longer than this get wrapped (or rotated)
     single_xlabel_wrap: true       # true = wrap long x labels onto short lines; false = rotate
     single_xlabel_wrap_width: 9    # target characters per line when wrapping x labels
     single_xlabel_angle: 30        # rotation angle used only when single_xlabel_wrap is false
     top_legend:             # figures whose legend is moved to the TOP of the plot
       - perf_cache_hierarchy
-      - nsight_kernel_time_abs_by_model
-      - cpu_energy_by_model_quant_log
-      - gpu_energy_by_model_quant_linear_ci50
-      - model_throughput_by_quant_combined_log
-      - nsight_kernel_time_by_gpu_model_grid
-      - nsight_transfer_bandwidth_combined_log
+      - gpu_kernel_time_by_model
+      - cpu_energy_by_model_log
+      - throughput_by_model_execmode_log
+      - gpu_kernel_time_by_model_gpu
+      - gpu_transfer_bandwidth_log
     inside_legend_pos: [0.99, 0.99]   # x,y in [0,1] panel coords for the inside legend
     inside_legend_just: ["right", "top"] # anchor corner of the inside legend box
 

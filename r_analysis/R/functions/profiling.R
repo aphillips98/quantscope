@@ -33,38 +33,11 @@ short_kernel_name <- function(x) {
   ifelse(nchar(base) == 0, substr(x, 1, 40), base)
 }
 
-## Stacked composition bar (NON-normalized): absolute magnitude of `value` by
-## `fill` group, per run/config. Same aggregation as prof_stacked_share but the
-## bars keep their true height (position = "stack") instead of being rescaled to
-## 100%. `scale_factor` rescales the summed value (e.g. 1e-9 for ns -> s).
-prof_stacked_absolute <- function(df, group_col, value_col, fill_col,
-                                  ylab, title, subtitle = NULL, fill_lab = NULL,
-                                  scale_factor = 1,
-                                  y_labels = scales::label_comma()) {
-  df <- df[is.finite(df[[value_col]]), , drop = FALSE]
-  if (!nrow(df)) return(NULL)
-  agg <- stats::aggregate(df[[value_col]],
-                          by = list(g = df[[group_col]], f = df[[fill_col]]),
-                          FUN = function(v) sum(v, na.rm = TRUE))
-  names(agg)[3] <- "value"
-  agg$value <- agg$value * scale_factor
-  p <- ggplot2::ggplot(agg, ggplot2::aes(x = g, y = value, fill = f)) +
-    ggplot2::geom_col(position = "stack", width = 0.8) +
-    ggplot2::scale_y_continuous(labels = y_labels,
-                                expand = ggplot2::expansion(mult = c(0, 0.05))) +
-    ggplot2::labs(title = title, subtitle = subtitle, x = NULL, y = ylab,
-                  fill = fill_lab %||% fill_col) +
-    scale_fill_pub() +
-    theme_pub() +
-    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 30, hjust = 1))
-  list(plot = p, data = agg)
-}
-
 ## Stacked composition bars split per model: one panel per model, x = quant,
-## bar height = absolute summed `value_col` by `fill_col`. Faceted counterpart
-## to prof_stacked_absolute; the y-axis is shared across panels so models are
-## directly comparable. `scale_factor` rescales the summed value (e.g. 1e-9 for
-## ns -> s). Requires `model` and `quant` columns in `df`.
+## bar height = absolute summed `value_col` by `fill_col`. The y-axis is shared
+## across panels so models are directly comparable. `scale_factor` rescales the
+## summed value (e.g. 1e-9 for ns -> s). Requires `model` and `quant` columns
+## in `df`.
 prof_stacked_absolute_by_model <- function(df, value_col, fill_col,
                                            ylab, title, subtitle = NULL,
                                            fill_lab = NULL, scale_factor = 1,

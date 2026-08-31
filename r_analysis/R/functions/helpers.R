@@ -240,11 +240,21 @@ write_result <- function(df, name) {
   invisible(base)
 }
 
+## Family-grouped output path (no extension) for a figure `name`: same-type
+## figures (e.g. "*_linear"/"*_log" variants) share one subfolder under
+## figures_dir, named after their common prefix (e.g. cpu_energy_by_model_quant/).
+fig_base_path <- function(name) {
+  fam <- sub("_(linear|log)$", "", sub("^figure[0-9]+[a-z]*_", "", name))
+  dir <- file.path(CFG$paths$figures_dir, fam)
+  if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
+  file.path(dir, name)
+}
+
 ## Save a figure to every configured raster/vector format.
 save_fig <- function(plot, name, data = NULL, prov = provenance(),
                      width = CFG$figures$width_in, height = CFG$figures$height_in,
                      dpi = CFG$figures$dpi %||% 300, caption = FALSE) {
-  base <- file.path(CFG$paths$figures_dir, name)
+  base <- fig_base_path(name)
   ## Move the title/subtitle out of the figure into a markdown sidecar so the
   ## saved plot keeps only its axes and legends. The extracted text is captured
   ## after the plot is built, preserving any values interpolated at runtime.
@@ -280,11 +290,12 @@ save_fig <- function(plot, name, data = NULL, prov = provenance(),
   ## the physical width (height kept proportional to preserve the aspect ratio).
   ie <- CFG$figures$ieee
   if (isTRUE(ie$enabled) && inherits(plot, "ggplot")) {
-    ieee_dir <- if (!is.null(ie$subdir) && nzchar(ie$subdir)) file.path(CFG$paths$figures_dir, ie$subdir) else CFG$paths$figures_dir
-    if (!dir.exists(ieee_dir)) dir.create(ieee_dir, recursive = TRUE)
     ## Descriptive name (figure-number prefix stripped) also used to look up the
     ## per-figure single-column list and for the output filename.
     ieee_name <- sub("^figure[0-9]+[a-z]*_", "", name)
+    ieee_dir <- dirname(base)
+    if (!is.null(ie$subdir) && nzchar(ie$subdir)) ieee_dir <- file.path(ieee_dir, ie$subdir)
+    if (!dir.exists(ieee_dir)) dir.create(ieee_dir, recursive = TRUE)
     ## Width: every figure is single-column (3.5 in) by DEFAULT; only figures
     ## explicitly listed in `ieee$double_column` are rendered at the two-column
     ## (full) width. Only the physical width changes -- content, shape and layout
@@ -454,9 +465,6 @@ save_fig <- function(plot, name, data = NULL, prov = provenance(),
     inside_names <- ie$inside_legend %||% character(0)
     is_inside    <- length(inside_names) > 0 &&
       (name %in% inside_names || ieee_name %in% inside_names)
-    force_single_row_top <-
-      grepl("^(figure2[lmno]_)?gpu_energy_by_model_quant_(linear|log)(?:_ci50)?$", name) ||
-      grepl("^gpu_energy_by_model_quant_(linear|log)(?:_ci50)?$", ieee_name)
 
     if (!is_inside &&
         "Quantization" %in% legend_names &&
@@ -478,7 +486,7 @@ save_fig <- function(plot, name, data = NULL, prov = provenance(),
         ## left margin instead of stretching across the full panel width.
         legend.spacing.x     = if (is_single) grid::unit(15, "pt")
                                else            grid::unit(11, "pt"),
-        legend.direction     = if (force_single_row_top) "horizontal" else "vertical",
+        legend.direction     = "vertical",
         legend.margin          = ggplot2::margin(1, 1, 1, 1)
       ) 
     }

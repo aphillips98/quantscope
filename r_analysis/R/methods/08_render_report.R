@@ -90,10 +90,12 @@ render_report <- function(metrics, design, stats_res, posthoc) {
   ieee_dir <- if (!is.null(CFG$figures$ieee$subdir) && nzchar(CFG$figures$ieee$subdir))
     file.path(CFG$paths$figures_dir, CFG$figures$ieee$subdir) else CFG$paths$figures_dir
   if (dir.exists(ieee_dir)) {
-    pdfs <- list.files(ieee_dir, pattern = "\\.pdf$", full.names = TRUE)
+    ## Figures live one family subfolder deep (e.g. cpu_energy_by_model_quant/).
+    pdfs <- list.files(ieee_dir, pattern = "\\.pdf$", full.names = TRUE,
+                      recursive = TRUE)
     for (pdf_path in sort(pdfs)) {
       fig_name <- sub("\\.pdf$", "", basename(pdf_path))
-      md_path  <- file.path(ieee_dir, paste0(fig_name, ".md"))
+      md_path  <- file.path(dirname(pdf_path), paste0(fig_name, ".md"))
       desc <- if (file.exists(md_path)) {
         paste(readLines(md_path, warn = FALSE), collapse = " ")
       } else fig_name

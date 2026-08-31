@@ -113,105 +113,9 @@ analyze_profiling <- function(prof) {
                  prov = prov(n), width = 11, height = 7)
       }
 
-      save_cache_hierarchy_arch_grid <- function(hier_df, fig_name,
-                                                 subtitle,
-                                                 md_lines = NULL) {
-        if (is.null(hier_df) || !nrow(hier_df) ||
-            !all(c("cpu_arch", "model", "quant", "level", "mean") %in% names(hier_df)))
-          return(invisible(NULL))
-        facet_layer <- if (requireNamespace("ggh4x", quietly = TRUE)) {
-          ggh4x::facet_grid2(
-            rows = ggplot2::vars(cpu_arch),
-            cols = ggplot2::vars(level),
-            scales = "free_y", switch = "y",
-            independent = "y"
-          )
-        } else {
-          ggplot2::facet_grid(
-            rows = ggplot2::vars(cpu_arch),
-            cols = ggplot2::vars(level),
-            scales = "free_y", switch = "y"
-          )
-        }
-        p <- ggplot2::ggplot(hier_df, ggplot2::aes(x = quant, y = mean, fill = model)) +
-          ggplot2::geom_col(position = ggplot2::position_dodge(width = 0.78),
-                            width = 0.68) +
-          facet_layer +
-          ggplot2::scale_y_continuous(
-            labels = scales::label_comma(),
-            expand = ggplot2::expansion(mult = c(0, 0.08))) +
-          ggplot2::labs(
-            title = "CPU cache hierarchy miss rates by CPU generation",
-            subtitle = subtitle,
-            x = "Quantization",
-            y = "Miss rate [%]",
-            fill = NULL
-          ) +
-          scale_fill_pub() +
-          theme_pub(base_size = 13) +
-          ggplot2::theme(
-            legend.position = "top",
-            legend.box = "horizontal",
-            legend.direction = "horizontal",
-            legend.justification = "center",
-            legend.key.size = grid::unit(0.8, "lines"),
-            panel.grid.major.x = ggplot2::element_blank(),
-            panel.grid.minor = ggplot2::element_blank(),
-            panel.grid.major.y = ggplot2::element_line(
-              colour = "grey88", linewidth = 0.4),
-            strip.text = ggplot2::element_text(face = "bold"),
-            strip.background = ggplot2::element_rect(fill = "grey94", colour = NA),
-            strip.placement = "outside",
-            axis.text.x = ggplot2::element_text(angle = 0, hjust = 0.5),
-            axis.title.x = ggplot2::element_text(face = "bold",
-                                                 margin = ggplot2::margin(t = 8)),
-            axis.title.y = ggplot2::element_text(face = "bold",
-                                                 margin = ggplot2::margin(r = 8))
-          )
-        if (!is.null(md_lines)) {
-          writeLines(md_lines, file.path(CFG$paths$figures_dir,
-                                         paste0(fig_name, ".md")))
-        }
-        save_fig(p, fig_name, data = hier_df, prov = prov(n),
-                 width = 12.5, height = 8.5)
-      }
-
       ## All available CPU perf runs (existing Figure 21 behavior).
       hier <- build_hier_data(pw)
       save_cache_hierarchy(hier, "figure21_perf_cache_hierarchy")
-
-      hier_amd_intel <- build_hier_data(pw, arch_keep = arch_levels)
-      save_cache_hierarchy_arch_grid(
-        hier_amd_intel,
-        "figure31_perf_cache_hierarchy_amd_intel",
-        paste("Columns = cache level (L1d, L1i, L2, L3); rows = CPU generation",
-              "(AMD, Intel). Bars show mean miss rate per model x quantization."),
-        md_lines = c(
-          "# CPU cache hierarchy miss rates by architecture (AMD vs Intel)",
-          "",
-          "Row 1: AMD CPU runs across all available models.",
-          "Row 2: Intel CPU runs across all available models."
-        )
-      )
-
-      focus_models <- c("Phi-3.5-mini-3.8B", "Llama-3.1-8B")
-      hier_amd_intel_focus <- build_hier_data(
-        pw,
-        model_keep = focus_models,
-        arch_keep = arch_levels
-      )
-      save_cache_hierarchy_arch_grid(
-        hier_amd_intel_focus,
-        "figure31b_perf_cache_hierarchy_amd_intel_focus_models",
-        paste("Columns = cache level (L1d, L1i, L2, L3); rows = CPU generation",
-              "(AMD, Intel). Restricted to Phi-3.5-mini-3.8B and Llama-3.1-8B."),
-        md_lines = c(
-          "# CPU cache hierarchy miss rates by architecture (AMD vs Intel), focused models",
-          "",
-          "Rows: AMD and Intel CPU runs.",
-          "Models: Phi-3.5-mini-3.8B and Llama-3.1-8B only."
-        )
-      )
 
       ## ---- Cache-miss rate by level, stacked panels (L1d / L2 / L3) in the
       ## figure7 aesthetic: x = model, one point per quantization with 95% CI.
@@ -333,17 +237,6 @@ analyze_profiling <- function(prof) {
       by_short <- by_short[order(-by_short$x), ]
       topn <- utils::head(by_short$kshort, 7)
       k$kgroup <- ifelse(k$kshort %in% topn, k$kshort, "Other")
-      k$cfg <- paste(k$model, k$quant, sep = " / ")
-      ## ---- N1b: same composition, NON-normalized (absolute device time in s)
-      f_abs <- prof_stacked_absolute(k, "cfg", "total_time_ns", "kgroup",
-                              "GPU kernel time (s)",
-                              "GPU kernel-time composition (Nsight, absolute)",
-                              "Top kernels by total device time; remainder lumped as 'Other'.",
-                              fill_lab = "Kernel", scale_factor = 1e-9)
-      if (!is.null(f_abs)) save_fig(f_abs$plot, "figure16b_nsight_kernel_time_abs",
-                                data = f_abs$data, prov = prov(n),
-                                width = 12, height = 6.5)
-
       ## ---- N1c: same composition, faceted per model (one panel each).
       f_abs_m <- prof_stacked_absolute_by_model(
         k, "total_time_ns", "kgroup",
@@ -353,7 +246,7 @@ analyze_profiling <- function(prof) {
               "One panel per model, x = quantization."),
         fill_lab = "Kernel", scale_factor = 1e-9)
       if (!is.null(f_abs_m))
-        save_fig(f_abs_m$plot, "figure16c_nsight_kernel_time_abs_by_model",
+        save_fig(f_abs_m$plot, "figure16c_gpu_kernel_time_by_model",
                  data = f_abs_m$data, prov = prov(n),
                  width = 12, height = 9.5)
 
@@ -373,7 +266,7 @@ analyze_profiling <- function(prof) {
         gpu_keep = c("V100", "A100", "H100")
       )
       if (!is.null(f_abs_grid))
-        save_fig(f_abs_grid$plot, "figure32_nsight_kernel_time_by_gpu_model_grid",
+        save_fig(f_abs_grid$plot, "figure32_gpu_kernel_time_by_model_gpu",
                  data = f_abs_grid$data, prov = prov(n),
                  width = 12.5, height = 8.5)
 
@@ -387,7 +280,7 @@ analyze_profiling <- function(prof) {
           "Colour = quantization, shape = GPU generation."),
         "Unified panel with linear y-axis.",
         log_y = FALSE)
-      if (!is.null(f_rt_lin)) save_fig(f_rt_lin$plot, "figure29a_nsight_kernel_runtime_gpu_linear",
+      if (!is.null(f_rt_lin)) save_fig(f_rt_lin$plot, "figure29a_gpu_kernel_runtime_linear",
                 data = f_rt_lin$data, prov = prov(n),
                 width = 11, height = 6)
 
@@ -399,53 +292,14 @@ analyze_profiling <- function(prof) {
           "Colour = quantization, shape = GPU generation."),
         "Unified panel with logarithmic y-axis.",
         log_y = TRUE)
-      if (!is.null(f_rt_log)) save_fig(f_rt_log$plot, "figure29b_nsight_kernel_runtime_gpu_log",
+      if (!is.null(f_rt_log)) save_fig(f_rt_log$plot, "figure29b_gpu_kernel_runtime_log",
                 data = f_rt_log$data, prov = prov(n),
                 width = 11, height = 6)
-    }
-
-    ## ---- N2: CUDA API time breakdown (memcpy / sync / launch)
-    api_cols <- intersect(c("cuda_memcpy_time_ns", "cuda_sync_time_ns",
-                            "cuda_launch_time_ns"), names(nw))
-    if (length(api_cols) >= 2) {
-      long <- do.call(rbind, lapply(api_cols, function(cc) {
-        data.frame(cfg = paste(nw$model, nw$quant, sep = " / "),
-                   category = c(cuda_memcpy_time_ns = "Memcpy",
-                                cuda_sync_time_ns = "Stream sync",
-                                cuda_launch_time_ns = "Kernel launch")[[cc]],
-                   value = suppressWarnings(as.numeric(nw[[cc]])),
-                   stringsAsFactors = FALSE)
-      }))
-      ## ---- N2b: same breakdown, NON-normalized (absolute CUDA API time in s)
-      f_abs <- prof_stacked_absolute(long, "cfg", "value", "category",
-                              "CUDA API time (s)",
-                              "CUDA API time composition (Nsight, absolute)",
-                              "Where host-side CUDA time goes per configuration.",
-                              fill_lab = "CUDA API", scale_factor = 1e-9)
-      if (!is.null(f_abs)) save_fig(f_abs$plot, "figure17b_nsight_cuda_api_abs",
-                                data = f_abs$data, prov = prov(n),
-                                width = 12, height = 6.5)
     }
 
     ## ---- N3: host<->device transfer volume (HtoD / DtoH)
     gm <- prof$gpu_mem
     if (!is.null(gm) && nrow(gm)) {
-      ## ---- N3b: transfer "bandwidth" = memcpy volume / total kernel runtime,
-      ## combined over both directions (HtoD + DtoH), by GPU generation.
-      f_bw <- prof_gpu_transfer_bandwidth_ci(
-        kern, gm, "Transfer volume / compute time [GB/s]",
-        "GPU transfer bandwidth by GPU generation (HtoD + DtoH combined)",
-        paste("GPU-only Nsight runs; bandwidth = total memcpy data volume",
-              "(HtoD + DtoH) divided by the run's total kernel runtime. Each",
-              "point = mean over repetitions, error bars = 95% CI. Colour =",
-              "quantization, shape = GPU generation."),
-        paste("Panels top-to-bottom: V100 (circle), A100 (triangle), H100",
-              "(square). Each GPU panel uses its own y-axis."),
-        combine = TRUE)
-      if (!is.null(f_bw)) save_fig(f_bw$plot, "figure30_nsight_transfer_bandwidth",
-                                data = f_bw$data, prov = prov(n),
-                                width = 11, height = 11)
-
       ## ---- N3c: same transfer-bandwidth response in one unified panel,
       ## combining V100/A100/H100 with a logarithmic y-axis.
       f_bw_log <- prof_gpu_transfer_bandwidth_ci(
@@ -458,7 +312,7 @@ analyze_profiling <- function(prof) {
         "Single panel combining V100, A100 and H100 on a log10 y-axis.",
         combine = TRUE, single_panel = TRUE, log_y = TRUE)
       if (!is.null(f_bw_log))
-        save_fig(f_bw_log$plot, "figure33_nsight_transfer_bandwidth_combined_log",
+        save_fig(f_bw_log$plot, "figure33_gpu_transfer_bandwidth_log",
                  data = f_bw_log$data, prov = prov(n),
                  width = 11, height = 6)
     }

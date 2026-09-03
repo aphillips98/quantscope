@@ -1,37 +1,37 @@
 # hpc_area_setup
 
-Herramienta genérica para construir e instalar [llama.cpp](https://github.com/ggml-org/llama.cpp) en un área personal de un clúster HPC. Produce una instalación por perfil de hardware y módulos Lua compatibles con Lmod o Environment Modules.
+Generic tool to build and install [llama.cpp](https://github.com/ggml-org/llama.cpp) in a personal area of an HPC cluster. It produces one installation per hardware profile and Lua modulefiles compatible with Lmod or Environment Modules.
 
-No necesita privilegios de administrador. Los compiladores, Git, CMake y CUDA normalmente los proporciona el clúster mediante módulos; el instalador los valida antes de iniciar una compilación y puede cargarlos con `--load-module`.
+No administrator privileges are required. Compilers, Git, CMake and CUDA are usually provided by the cluster via modules; the installer validates them before starting a build and can load them with `--load-module`.
 
-## Estructura instalada
+## Installed structure
 
-Para un perfil `H100` con CUDA se generan:
+For an `H100` profile with CUDA, the following are generated:
 
 ```text
 ~/.local/programs/H100/llamacpp_cuda/
 ~/.local/modules/H100/llamacpp_cuda/1.lua
 ```
 
-Para CPU, el paquete se denomina `llamacpp`. Esta convención generaliza los modulefiles existentes y evita rutas especiales por máquina.
+For CPU, the package is named `llamacpp`. This convention generalizes the existing modulefiles and avoids machine-specific paths.
 
-## Requisitos
+## Requirements
 
 - Bash 4+
 - `git`
 - `cmake`
-- Compilador C y C++ (`cc` y `c++`, o las variables `CC` y `CXX`)
-- `nvcc` cuando se utiliza `--cuda`
-- Una instalación funcional de Lmod o Environment Modules solo si se usa `--load-module` o se desea cargar el modulefile después
+- C and C++ compiler (`cc` and `c++`, or the `CC` and `CXX` variables)
+- `nvcc` when using `--cuda`
+- A working Lmod or Environment Modules installation only if using `--load-module` or if you want to load the modulefile afterwards
 
-Carga los módulos requeridos en la sesión o indícalos al instalador. Por ejemplo:
+Load the required modules in the session or pass them to the installer. For example:
 
 ```bash
 module load gcc cmake git cuda/12.8
 ./install_llamacpp.sh build --profile H100 --cuda --cuda-architectures 90
 ```
 
-También puede cargarlos el propio instalador:
+The installer can also load them itself:
 
 ```bash
 ./install_llamacpp.sh build --profile H100 --cuda \
@@ -39,28 +39,28 @@ También puede cargarlos el propio instalador:
   --load-module gcc --load-module cmake --load-module git --load-module cuda/12.8
 ```
 
-## Uso
+## Usage
 
-| Objetivo | Comando |
+| Goal | Command |
 | --- | --- |
-| Compilación CPU portable | `./install_llamacpp.sh build --profile CPU` |
-| CPU optimizada para el nodo | `./install_llamacpp.sh build --profile EPYC --native` |
-| Compilación CUDA | `./install_llamacpp.sh build --profile DGX --cuda --cuda-architectures "80;90"` |
-| Reanudar tras un corte | `./install_llamacpp.sh continue --profile DGX --cuda` |
-| Regenerar solo el módulo | `./install_llamacpp.sh module --profile DGX --cuda` |
-| Desinstalar sin confirmación | `./install_llamacpp.sh uninstall --profile DGX --cuda --yes` |
+| Portable CPU build | `./install_llamacpp.sh build --profile CPU` |
+| Node-optimized CPU build | `./install_llamacpp.sh build --profile EPYC --native` |
+| CUDA build | `./install_llamacpp.sh build --profile DGX --cuda --cuda-architectures "80;90"` |
+| Resume after an interruption | `./install_llamacpp.sh continue --profile DGX --cuda` |
+| Regenerate only the module | `./install_llamacpp.sh module --profile DGX --cuda` |
+| Uninstall without confirmation | `./install_llamacpp.sh uninstall --profile DGX --cuda --yes` |
 
-`--profile` se determina, por orden, con `HPC_PROFILE`, `SLURM_JOB_PARTITION` y finalmente `default`. En clústeres con nombres de partición poco descriptivos, establece explícitamente `--profile` para que la ruta del módulo sea estable.
+`--profile` is determined, in order, by `HPC_PROFILE`, `SLURM_JOB_PARTITION` and finally `default`. On clusters with uninformative partition names, set `--profile` explicitly so the module path stays stable.
 
-La compilación CPU es portable por defecto. Usa `--native` únicamente cuando el binario vaya a ejecutarse en nodos de la misma microarquitectura. Para CUDA, especificar `--cuda-architectures` minimiza el tiempo de compilación y produce binarios adecuados para las GPU objetivo, por ejemplo `70`, `80` o `90`.
+The CPU build is portable by default. Use `--native` only when the binary will run on nodes with the same microarchitecture. For CUDA, specifying `--cuda-architectures` minimizes build time and produces binaries suited to the target GPUs, e.g. `70`, `80` or `90`.
 
-Por defecto se sigue la rama `master` de `ggml-org/llama.cpp`. Para una instalación reproducible, fija una etiqueta o commit:
+By default, the `master` branch of `ggml-org/llama.cpp` is used. For a reproducible installation, pin a tag or commit:
 
 ```bash
 ./install_llamacpp.sh build --profile CPU --ref b1234 --version 2026.09
 ```
 
-## Cargar y comprobar
+## Load and verify
 
 ```bash
 module use "$HOME/.local/modulefiles"
@@ -71,14 +71,14 @@ llama-server --help
 
 ## tmux
 
-`install_tmux.sh` descarga el tarball oficial de tmux, lo compila e instala junto a un módulo Lua. Requiere un compilador C, `make`, `tar`, `curl` o `wget`, además de las cabeceras y bibliotecas de `libevent` y `ncurses`. En un clúster, carga los módulos que proporcionen esas dependencias:
+`install_tmux.sh` downloads the official tmux tarball, builds it and installs it along with a Lua module. It requires a C compiler, `make`, `tar`, `curl` or `wget`, plus the headers and libraries for `libevent` and `ncurses`. On a cluster, load the modules that provide those dependencies:
 
 ```bash
 ./install_tmux.sh build --version 3.5a \
   --load-module gcc --load-module libevent --load-module ncurses
 ```
 
-La instalación predeterminada queda en `~/.local/programs/tmux/3.5a` y publica `~/.local/modules/tmux/3.5a.lua`. Registra la raíz una vez por sesión y carga tmux cuando se necesite una sesión persistente de compilación:
+The default installation is placed at `~/.local/programs/tmux/3.5a` and publishes `~/.local/modules/tmux/3.5a.lua`. Register the root once per session and load tmux when a persistent build session is needed:
 
 ```bash
 module use "$HOME/.local/modules"
@@ -86,11 +86,11 @@ module load tmux/3.5a
 tmux new -s llamacpp-build
 ```
 
-El módulo solo añade sus directorios `bin` y `share/man`; tmux no es una dependencia de llama.cpp y por ello `install_llamacpp.sh` no lo carga implícitamente.
+The module only adds its `bin` and `share/man` directories; tmux is not a dependency of llama.cpp, so `install_llamacpp.sh` does not load it implicitly.
 
-El uso de modelos GGUF queda separado deliberadamente: el instalador deja disponibles los ejecutables de llama.cpp y no descarga decenas de gigabytes de modelos. El script vecino `../download_models.sh` puede conservarse para esa operación.
+Usage of GGUF models is deliberately kept separate: the installer only makes the llama.cpp executables available and does not download tens of gigabytes of models. The neighboring script `../download_models.sh` can be kept for that operation.
 
-## Validación rápida
+## Quick validation
 
 ```bash
 bash -n install_llamacpp.sh

@@ -1,0 +1,53 @@
+version: 1
+profiles:
+  dgx002_cpu:
+    scheduler:
+      partition: A100
+      nodelist: dgx002
+      cpus_per_task: 32
+      memory: 100G
+      time: "2:00:00"
+    modules: []
+  dgx003_cpu:
+    scheduler:
+      partition: H100
+      nodelist: dgx003
+      cpus_per_task: 32
+      memory: 100G
+      time: "2:00:00"
+    modules: []
+  epyc008_cpu:
+    scheduler:
+      partition: EPYC
+      nodelist: epyc008
+      cpus_per_task: 32
+      memory: 100GB
+      time: "2:00:00"
+    modules: []
+  gpu:
+    scheduler:
+      partition: GPU
+      nodelist: gpu002
+      gres: gpu:V100:1
+      cpus_per_task: 16
+      memory: 64G
+      time: "2:00:00"
+    modules: [cuda]
+  a100:
+    scheduler:
+      partition: A100
+      gpus: gpu:a100:1
+      cpus_per_task: 16
+      memory: 100G
+      time: "08:00:00"
+    modules: [cuda]
+  h100:
+    scheduler:
+      account: dssc
+      partition: H100
+      nodelist: dgx003
+      gres: gpu:H100:1
+      cpus_per_task: 16
+      memory: 100G
+      time: "2:00:00"
+    modules: [cuda]

@@ -1,0 +1,16 @@
+version: 1
+name: full
+model: hf-model
+hardware_profile: a100
+repetitions: 3
+seed: 42
+capture_predictions: false
+scoring: [exact_match]
+benchmarks:
+  mmlu:
+    shots: 5
+  hellaswag:
+    shots: 10
+telemetry:
+  require_energy: false
+  sample_interval_seconds: 1.0

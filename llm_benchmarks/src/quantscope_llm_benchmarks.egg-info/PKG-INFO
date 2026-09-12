@@ -1,0 +1,80 @@
+Metadata-Version: 2.4
+Name: quantscope-llm-benchmarks
+Version: 0.1.0
+Summary: Standalone, reproducible LLM benchmark runner for HPC systems
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: PyYAML<7,>=6.0.2
+Provides-Extra: deepeval
+Requires-Dist: deepeval<3,>=2; extra == "deepeval"
+Provides-Extra: transformers
+Requires-Dist: torch>=2.2; extra == "transformers"
+Requires-Dist: transformers>=4.40; extra == "transformers"
+Provides-Extra: vllm
+Requires-Dist: vllm>=0.6; extra == "vllm"
+Provides-Extra: llamacpp
+Requires-Dist: llama-cpp-python>=0.3; extra == "llamacpp"
+Provides-Extra: telemetry
+Requires-Dist: pynvml>=11.5; extra == "telemetry"
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+
+# QuantScope LLM Benchmarks
+
+Standalone benchmark runner for MMLU and HellaSwag on CPU and NVIDIA GPUs,
+including A100 and H100 systems. It does not depend on the repository's
+profiling or R-analysis pipelines.
+
+## Install
+
+Load the site Python/CUDA modules appropriate to the selected backend, then
+create an isolated environment:
+
+```bash
+cd llm_benchmarks
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+Install only the backend extras required on the target node:
+
+```bash
+python -m pip install -e '.[deepeval,transformers,telemetry]'
+python -m pip install -e '.[deepeval,llamacpp,telemetry]'
+python -m pip install -e '.[deepeval,vllm,telemetry]'
+```
+
+## Validate a campaign
+
+Examples deliberately contain no private paths, accounts, or partitions.
+Copy them before setting model locations and scheduler values.
+
+```bash
+qscope-bench validate \
+  --models configs/models.example.yml \
+  --campaign configs/campaigns/smoke.example.yml \
+  --hardware configs/hardware_profiles.example.yml
+```
+
+The command performs no model download, hardware reservation, or benchmark
+execution. It validates backend references, scoring modes, benchmark limits,
+and the requested hardware profile.
+
+## Configuration contract
+
+- A model names one backend: `llamacpp`, `transformers`, or `vllm`.
+- A model source is exactly one of `local_path` or `hf_id`.
+- A campaign uses MMLU, HellaSwag, or both. MMLU permits 0-5 shots and
+  HellaSwag permits 0-15.
+- `exact_match` is available to every backend. `log_likelihood` is requested
+  only for adapters that declare it as a capability at runtime.
+- Hardware profiles are scheduler templates, not hardware detection. Runtime
+  detection and energy collection are implemented by later runner stages.
+
+## Status
+
+The initial foundation provides the installable package, versioned YAML
+configuration and a validation CLI. Model adapters, DeepEval execution,
+telemetry, artifacts and SLURM submission will build on this contract.

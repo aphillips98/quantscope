@@ -1,0 +1,20 @@
+version: 1
+name: smoke
+model: local-gguf
+hardware_profile: cpu
+repetitions: 1
+seed: 42
+capture_predictions: true
+scoring: [exact_match, log_likelihood]
+benchmarks:
+  mmlu:
+    shots: 0
+    tasks: [high_school_computer_science]
+    max_samples: 5
+  hellaswag:
+    shots: 0
+    tasks: [applying_sunscreen]
+    max_samples: 5
+telemetry:
+  require_energy: false
+  sample_interval_seconds: 1.0

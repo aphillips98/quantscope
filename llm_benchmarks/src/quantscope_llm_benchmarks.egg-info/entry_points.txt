@@ -1,0 +1,2 @@
+[console_scripts]
+qscope-bench = quantscope_bench.cli:main

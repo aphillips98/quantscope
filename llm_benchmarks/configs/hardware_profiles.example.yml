@@ -1,0 +1,33 @@
+version: 1
+profiles:
+  cpu:
+    scheduler:
+      partition: replace-me
+      cpus_per_task: 32
+      memory: 64G
+      time: "08:00:00"
+    modules: []
+  gpu:
+    scheduler:
+      partition: replace-me
+      gpus: 1
+      cpus_per_task: 16
+      memory: 64G
+      time: "08:00:00"
+    modules: [cuda]
+  a100:
+    scheduler:
+      partition: replace-me
+      gpus: a100:1
+      cpus_per_task: 16
+      memory: 64G
+      time: "08:00:00"
+    modules: [cuda]
+  h100:
+    scheduler:
+      partition: replace-me
+      gpus: h100:1
+      cpus_per_task: 16
+      memory: 96G
+      time: "08:00:00"
+    modules: [cuda]

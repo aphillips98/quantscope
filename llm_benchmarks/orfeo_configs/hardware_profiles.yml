@@ -16,13 +16,13 @@ profiles:
       memory: 100G
       time: "2:00:00"
     modules: []
-  epyc008_cpu:
+  epyc_cpu:
     scheduler:
       partition: EPYC
       nodelist: epyc008
       cpus_per_task: 32
       memory: 100GB
-      time: "2:00:00"
+      time: "12:00:00"
     modules: []
   gpu:
     scheduler:

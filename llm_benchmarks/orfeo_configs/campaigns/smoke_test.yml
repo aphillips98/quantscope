@@ -1,20 +1,20 @@
 version: 1
 name: smoke
 model: local-gguf
-hardware_profile: cpu
+hardware_profile: epyc_cpu
 repetitions: 1
 seed: 42
 capture_predictions: true
-scoring: [exact_match, log_likelihood]
+scoring: [exact_match]
 benchmarks:
   mmlu:
-    shots: 0
+    shots: 5
     tasks: [high_school_computer_science]
     max_samples: 5
   hellaswag:
-    shots: 0
+    shots: 5
     tasks: [applying_sunscreen]
     max_samples: 5
 telemetry:
-  require_energy: false
+  require_energy: true
   sample_interval_seconds: 1.0

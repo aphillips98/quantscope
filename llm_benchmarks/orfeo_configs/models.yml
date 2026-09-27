@@ -2,19 +2,7 @@ version: 1
 models:
   local-gguf:
     backend: llamacpp
-    local_path: /replace/with/model.gguf
+    local_path: /orfeo/cephfs/home/dssc/aphillips/dev/power_analysis/models/llm-models/llama3.1-8b/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
     inference:
       context_size: 4096
-      temperature: 0.0
-  hf-model:
-    backend: transformers
-    hf_id: organization/model-name
-    inference:
-      dtype: bfloat16
-      temperature: 0.0
-  vllm-model:
-    backend: vllm
-    hf_id: organization/model-name
-    inference:
-      dtype: bfloat16
       temperature: 0.0

@@ -13,16 +13,51 @@ Standalone benchmark runner for MMLU and HellaSwag on CPU and NVIDIA GPUs, inclu
 ## Requirements
 
 - Python 3.10+
-- `pip` and a virtual environment
+- [`uv`](https://docs.astral.sh/uv/) (recommended) or standard `pip` with `venv`
 - Backend dependencies for the target setup:
   - `transformers`
   - `llamacpp`
   - `vllm`
   - `telemetry` (optional for platform and energy collection)
+  - `dev` (optional for running tests)
 
 ## Installation
 
+### Automated install with `uv` (detecting loaded modules)
+
+If you load your cluster's environment modules (e.g. `cuda` and `llamacpp` prebuilt by `hpc_area_setup`), use the auto-detecting installer script:
+
+```bash
+module use ~/.local/modules
+module load H100/llamacpp_cuda/1   # or CPU/llamacpp/1
+
+cd llm_benchmarks
+./install_env.sh
+```
+
+This script detects `$LOADEDMODULES`, sets up `.venv`, and runs `uv pip install` with the matching extras automatically. For `llamacpp`, it rebuilds the native library for the installed `llama-cpp-python` binding instead of linking the module's `libllama.so`; this prevents ABI mismatches between the C++ library and the Python package.
+
+### Manual `uv` install
+
 From the project root:
+
+```bash
+cd llm_benchmarks
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e .
+```
+
+If you plan to use a specific backend or development tools, install the matching extra:
+
+```bash
+uv pip install -e '.[deepeval,transformers,telemetry]'
+uv pip install -e '.[deepeval,llamacpp,telemetry]'
+uv pip install -e '.[deepeval,vllm,telemetry]'
+uv pip install -e '.[dev,telemetry]'
+```
+
+### Using standard `pip`
 
 ```bash
 cd llm_benchmarks
@@ -38,6 +73,7 @@ If you plan to use a specific backend, install the matching extra:
 python -m pip install -e '.[deepeval,transformers,telemetry]'
 python -m pip install -e '.[deepeval,llamacpp,telemetry]'
 python -m pip install -e '.[deepeval,vllm,telemetry]'
+python -m pip install -e '.[dev,telemetry]'
 ```
 
 ## Quick start
@@ -156,6 +192,9 @@ Expected output:
 ```text
 Valid campaign: model=local-gguf backend=llamacpp profile=cpu benchmarks=mmlu,hellaswag scoring=exact_match,log_likelihood
 ```
+
+Logging is disabled by default. Add `--log-level INFO` for campaign progress or
+`--log-level DEBUG` for per-sample timing and adapter details to either command.
 
 ## Run a campaign
 

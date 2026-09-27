@@ -61,3 +61,8 @@ __pycache__/
 .venv/
 venv/
 env/
+
+# Generated LLM benchmark outputs and local telemetry
+/llm_benchmarks/artifacts/
+/llm_benchmarks/.deepeval/
+/llm_benchmarks/src/*.egg-info/

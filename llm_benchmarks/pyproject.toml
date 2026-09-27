@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-deepeval = ["deepeval>=2,<3"]
+deepeval = ["deepeval>=2,<3", "pandas>=2", "datasets>=2,<4"]
 transformers = ["torch>=2.2", "transformers>=4.40"]
 vllm = ["vllm>=0.6"]
 llamacpp = ["llama-cpp-python>=0.3"]

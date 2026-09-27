@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock
 
-from quantscope_bench.benchmarks.deepeval import _normalize_predictions, _resolve_task
+from quantscope_bench.benchmarks.deepeval import (
+    _make_deepeval_model,
+    _normalize_predictions,
+    _resolve_task,
+)
 
 
 class FakeFrame:
@@ -16,6 +21,16 @@ class FakeTasks:
 
 
 class DeepEvalBridgeTests(unittest.TestCase):
+    def test_batch_generates_normalized_choices(self) -> None:
+        adapter = Mock()
+        adapter.generate.side_effect = ["Answer: B", "C"]
+        model = _make_deepeval_model(object, adapter)
+
+        with self.assertRaises(TypeError):
+            model.batch_generate(prompts=["first"], schemas=[object])
+        self.assertEqual(model.batch_generate(["first", "second"]), ["B", "C"])
+        self.assertEqual(adapter.generate.call_count, 2)
+
     def test_resolves_yaml_task_name_to_enum(self) -> None:
         self.assertEqual(_resolve_task(FakeTasks, "astronomy"), "astronomy")
 

@@ -6,7 +6,6 @@ from typing import Any, Sequence
 
 from quantscope_bench.adapters.base import AdapterCapabilities, ModelAdapter
 
-
 class TransformersAdapter(ModelAdapter):
     capabilities = AdapterCapabilities(log_likelihood=True)
 

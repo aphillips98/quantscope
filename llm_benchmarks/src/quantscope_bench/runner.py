@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from time import perf_counter
 from typing import Iterable
 
 from quantscope_bench.adapters.base import ModelAdapter
 from quantscope_bench.reporting import SampleResult
 from quantscope_bench.scoring import best_option, exact_match, normalize_choice
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,7 @@ def evaluate_samples(
     """Evaluate samples once per selected scoring method."""
     results: list[SampleResult] = []
     for sample in samples:
+        LOGGER.debug("Evaluating %s/%s sample %s", sample.benchmark, sample.task, sample.sample_id)
         if "exact_match" in scoring_methods:
             started = perf_counter()
             response = adapter.generate(sample.prompt)
@@ -49,6 +53,7 @@ def evaluate_samples(
                     raw_response=response,
                 )
             )
+            LOGGER.debug("Completed exact_match for sample %s in %.3fs", sample.sample_id, latency)
         if "log_likelihood" in scoring_methods:
             if not adapter.capabilities.log_likelihood:
                 raise RuntimeError("Selected adapter does not support log_likelihood scoring")
@@ -71,4 +76,6 @@ def evaluate_samples(
                     option_scores=tuple(scores),
                 )
             )
+            LOGGER.debug("Completed log_likelihood for sample %s in %.3fs", sample.sample_id, latency)
+    LOGGER.info("Evaluated %d result rows", len(results))
     return results

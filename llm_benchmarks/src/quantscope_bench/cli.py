@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 from typing import Sequence
 
 from quantscope_bench.config import ConfigurationError, get_model, load_yaml, validate_campaign
+
+LOGGER = logging.getLogger(__name__)
+_LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,21 +20,34 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--models", type=Path, required=True)
     validate.add_argument("--campaign", type=Path, required=True)
     validate.add_argument("--hardware", type=Path, required=True)
+    validate.add_argument("--log-level", choices=_LOG_LEVELS, default="CRITICAL")
     run = subcommands.add_parser("run", help="run an exact-match DeepEval campaign")
     run.add_argument("--models", type=Path, required=True)
     run.add_argument("--campaign", type=Path, required=True)
     run.add_argument("--hardware", type=Path, required=True)
     run.add_argument("--output-dir", type=Path, required=True)
+    run.add_argument("--log-level", choices=_LOG_LEVELS, default="CRITICAL")
     return parser
+
+
+def _configure_logging(level_name: str) -> None:
+    logging.basicConfig(
+        level=getattr(logging, level_name),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
+    _configure_logging(arguments.log_level)
+    LOGGER.debug("Starting %s command", arguments.command)
     try:
+        LOGGER.info("Loading benchmark configuration")
         models = load_yaml(arguments.models)
         campaign_document = load_yaml(arguments.campaign)
         hardware = load_yaml(arguments.hardware)
         campaign = validate_campaign(models, campaign_document, hardware)
+        LOGGER.info("Validated campaign for model %s", campaign.model_name)
     except ConfigurationError as error:
         print(f"Configuration error: {error}")
         return 2
@@ -55,11 +72,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         from quantscope_bench.reporting import write_run_artifacts
         from quantscope_bench.telemetry import collect_platform_inventory
 
+        LOGGER.info("Creating %s adapter", campaign.backend)
         adapter = create_adapter(get_model(models, campaign.model_name))
         try:
+            LOGGER.info("Running benchmark campaign")
             results, benchmark_metadata = run_deepeval_campaign(adapter, campaign_document, "run-1")
         finally:
             adapter.close()
+            LOGGER.debug("Closed model adapter")
+        LOGGER.info("Writing benchmark artifacts to %s", arguments.output_dir)
         write_run_artifacts(
             arguments.output_dir,
             {"campaign": campaign_document, "platform": collect_platform_inventory(), **benchmark_metadata},
@@ -67,6 +88,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             bool(campaign_document.get("capture_predictions", False)),
         )
     except (RuntimeError, ConfigurationError) as error:
+        LOGGER.error("Benchmark run failed: %s", error)
         print(f"Run error: {error}")
         return 2
     print(f"{message}; wrote artifacts to {arguments.output_dir}")

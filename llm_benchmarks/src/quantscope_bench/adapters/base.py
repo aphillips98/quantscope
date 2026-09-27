@@ -6,12 +6,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Sequence
 
-
 @dataclass(frozen=True)
 class AdapterCapabilities:
     generation: bool = True
     log_likelihood: bool = False
-
 
 class ModelAdapter(ABC):
     """A loaded model capable of deterministic option selection."""

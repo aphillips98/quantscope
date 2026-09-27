@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -33,11 +36,13 @@ def write_run_artifacts(
     """Write atomically replaceable aggregates plus optional per-sample JSONL."""
     output_dir.mkdir(parents=True, exist_ok=True)
     result_list = list(results)
+    LOGGER.debug("Writing artifacts for %d result rows", len(result_list))
     _write_json(output_dir / "metadata.json", metadata)
     _write_csv(output_dir / "samples.csv", result_list)
     _write_csv(output_dir / "summary.csv", _summaries(result_list))
     if capture_predictions:
         _write_jsonl(output_dir / "predictions.jsonl", result_list)
+    LOGGER.info("Wrote benchmark artifacts to %s", output_dir)
 
 
 def _summaries(results: list[SampleResult]) -> list[dict[str, Any]]:

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from quantscope_bench.adapters.base import ModelAdapter
 from quantscope_bench.config import ConfigurationError
 
+LOGGER = logging.getLogger(__name__)
 
 def create_adapter(model: dict[str, Any]) -> ModelAdapter:
     backend = model["backend"]
+    LOGGER.debug("Selecting adapter for backend %s", backend)
     if backend == "llamacpp":
         from quantscope_bench.adapters.llamacpp import LlamaCppAdapter
 

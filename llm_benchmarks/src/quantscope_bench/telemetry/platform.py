@@ -8,7 +8,6 @@ import subprocess
 import sys
 from typing import Any
 
-
 def collect_platform_inventory() -> dict[str, Any]:
     inventory: dict[str, Any] = {
         "hostname": platform.node(),

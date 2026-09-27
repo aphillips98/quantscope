@@ -6,7 +6,6 @@ from typing import Any
 
 from quantscope_bench.adapters.base import AdapterCapabilities, ModelAdapter
 
-
 class LlamaCppAdapter(ModelAdapter):
     capabilities = AdapterCapabilities(log_likelihood=False)
 

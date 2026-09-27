@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ SUPPORTED_BACKENDS = frozenset({"llamacpp", "transformers", "vllm"})
 SUPPORTED_BENCHMARKS = frozenset({"mmlu", "hellaswag"})
 SUPPORTED_SCORING = frozenset({"exact_match", "log_likelihood"})
 SHOT_LIMITS = {"mmlu": 5, "hellaswag": 15}
+LOGGER = logging.getLogger(__name__)
 
 
 class ConfigurationError(ValueError):
@@ -29,6 +31,7 @@ class ValidatedCampaign:
 
 def load_yaml(path: Path) -> dict[str, Any]:
     """Load a YAML mapping and give an actionable error for malformed input."""
+    LOGGER.debug("Loading YAML configuration from %s", path)
     try:
         contents = yaml.safe_load(path.read_text(encoding="utf-8"))
     except OSError as error:
@@ -38,6 +41,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
     if not isinstance(contents, dict):
         raise ConfigurationError(f"{path} must contain a top-level mapping")
+    LOGGER.debug("Loaded YAML configuration from %s", path)
     return contents
 
 
@@ -45,6 +49,7 @@ def validate_campaign(
     models: dict[str, Any], campaign: dict[str, Any], hardware: dict[str, Any]
 ) -> ValidatedCampaign:
     """Validate cross-file references and benchmark invariants before execution."""
+    LOGGER.debug("Validating campaign configuration")
     _require_version(models, "models")
     _require_version(campaign, "campaign")
     _require_version(hardware, "hardware")
@@ -97,13 +102,20 @@ def validate_campaign(
     if not isinstance(repetitions, int) or isinstance(repetitions, bool) or repetitions < 1:
         raise ConfigurationError("campaign repetitions must be a positive integer")
 
-    return ValidatedCampaign(
+    validated = ValidatedCampaign(
         model_name=model_name,
         backend=backend,
         profile_name=profile_name,
         benchmark_names=tuple(benchmark_names),
         scoring_methods=tuple(scoring_methods),
     )
+    LOGGER.debug(
+        "Campaign validation complete: model=%s backend=%s benchmarks=%s",
+        validated.model_name,
+        validated.backend,
+        ",".join(validated.benchmark_names),
+    )
+    return validated
 
 
 def get_model(models: dict[str, Any], model_name: str) -> dict[str, Any]:

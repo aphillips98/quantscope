@@ -3,6 +3,7 @@
 set -euo pipefail
 
 PROGRAM_NAME="${0##*/}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMMAND="build"
 PROFILE="${HPC_PROFILE:-${SLURM_JOB_PARTITION:-default}}"
 PREFIX=""
@@ -31,6 +32,7 @@ Commands:
   help        Show this help
 
 Options:
+    --config NAME|PATH      Load configs/NAME.conf or the specified config file
   --profile NAME          Hardware or scheduler profile (default: HPC_PROFILE,
                           SLURM_JOB_PARTITION, or "default")
   --prefix PATH           Installation prefix; overrides the profile convention
@@ -48,6 +50,7 @@ Options:
   -h, --help              Show this help
 
 Examples:
+    ${PROGRAM_NAME} --config EPYC_node
   ${PROGRAM_NAME} build --profile CPU
   ${PROGRAM_NAME} build --profile H100 --cuda --cuda-architectures 90 --load-module cuda/12.8
   ${PROGRAM_NAME} build --profile EPYC --native
@@ -63,6 +66,105 @@ die() {
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+parse_boolean() {
+    local key="$1"
+    local value="${2,,}"
+    case "$value" in
+        1|true|yes|on) BOOLEAN_VALUE=1 ;;
+        0|false|no|off) BOOLEAN_VALUE=0 ;;
+        *) die "Config key '$key' must be true or false: $2" ;;
+    esac
+}
+
+resolve_config() {
+    local requested="$1"
+    if [[ -f "$requested" ]]; then
+        CONFIG_FILE="$requested"
+    elif [[ -f "${SCRIPT_DIR}/configs/${requested}" ]]; then
+        CONFIG_FILE="${SCRIPT_DIR}/configs/${requested}"
+    elif [[ -f "${SCRIPT_DIR}/configs/${requested}.conf" ]]; then
+        CONFIG_FILE="${SCRIPT_DIR}/configs/${requested}.conf"
+    else
+        die "Config not found: $requested"
+    fi
+}
+
+load_config() {
+    local config_path="$1"
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%%#*}"
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        [[ "$line" =~ ^[[:space:]]*([a-z_]+)[[:space:]]*=(.*)$ ]] || \
+            die "Invalid config line in $config_path: $line"
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        if [[ "$value" == "~/"* ]]; then
+            value="${HOME}/${value:2}"
+        fi
+
+        case "$key" in
+            command) COMMAND="$value" ;;
+            profile) PROFILE="$value" ;;
+            prefix) PREFIX="$value" ;;
+            module_root) MODULE_ROOT="$value" ;;
+            source_dir) SOURCE_DIR="$value" ;;
+            version) VERSION="$value" ;;
+            ref) REF="$value" ;;
+            jobs) JOBS="$value" ;;
+            build_type)
+                [[ "$value" == "Release" || "$value" == "Debug" ]] || \
+                    die "Config key 'build_type' must be Release or Debug: $value"
+                BUILD_TYPE="$value"
+                ;;
+            cuda)
+                parse_boolean "$key" "$value"
+                CUDA="$BOOLEAN_VALUE"
+                ;;
+            native)
+                parse_boolean "$key" "$value"
+                NATIVE="$BOOLEAN_VALUE"
+                ;;
+            cuda_architectures) CUDA_ARCHITECTURES="$value" ;;
+            assume_yes)
+                parse_boolean "$key" "$value"
+                ASSUME_YES="$BOOLEAN_VALUE"
+                ;;
+            load_module)
+                [[ -n "$value" ]] || die "Config key 'load_module' may not be empty"
+                MODULES_TO_LOAD+=("$value")
+                ;;
+            *) die "Unknown config key in $config_path: $key" ;;
+        esac
+    done <"$config_path"
+
+    case "$COMMAND" in
+        build|continue|module|uninstall|clean|help) ;;
+        *) die "Unsupported command in $config_path: $COMMAND" ;;
+    esac
+}
+
+preload_config() {
+    local config_name=""
+    while (($# > 0)); do
+        case "$1" in
+            --config)
+                [[ -z "$config_name" ]] || die "--config may only be specified once"
+                config_name="${2:?--config requires a value}"
+                shift 2
+                ;;
+            *) shift ;;
+        esac
+    done
+
+    if [[ -n "$config_name" ]]; then
+        resolve_config "$config_name"
+        load_config "$CONFIG_FILE"
+    fi
 }
 
 validate_profile() {
@@ -86,17 +188,10 @@ confirm() {
 }
 
 parse_args() {
-    if (($# > 0)); then
-        case "$1" in
-            build|continue|module|uninstall|clean|help)
-                COMMAND="$1"
-                shift
-                ;;
-        esac
-    fi
-
     while (($# > 0)); do
         case "$1" in
+            build|continue|module|uninstall|clean|help) COMMAND="$1"; shift ;;
+            --config) shift 2 ;;
             --profile) PROFILE="${2:?--profile requires a value}"; shift 2 ;;
             --prefix) PREFIX="${2:?--prefix requires a value}"; shift 2 ;;
             --module-root) MODULE_ROOT="${2:?--module-root requires a value}"; shift 2 ;;
@@ -162,13 +257,25 @@ local version = "${VERSION}"
 whatis("Name         : " .. name)
 whatis("Version      : " .. version)
 whatis("Description  : llama.cpp installed by hpc_area_setup")
+whatis("Git ref      : ${REF}")
 
 family("llamacpp")
 
 local base = "${PREFIX}"
+setenv("LLAMACPP_HOME", base)
+setenv("LLAMACPP_REF", "${REF}")
+if isDir(pathJoin(base, "lib64")) then
+    setenv("LLAMA_CPP_LIB", pathJoin(base, "lib64", "libllama.so"))
+    prepend_path("PKG_CONFIG_PATH", pathJoin(base, "lib64", "pkgconfig"))
+else
+    setenv("LLAMA_CPP_LIB", pathJoin(base, "lib", "libllama.so"))
+    prepend_path("PKG_CONFIG_PATH", pathJoin(base, "lib", "pkgconfig"))
+end
+
 prepend_path("PATH", pathJoin(base, "bin"))
 prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib64"))
 prepend_path("LD_LIBRARY_PATH", pathJoin(base, "lib"))
+prepend_path("CMAKE_PREFIX_PATH", base)
 prepend_path("MANPATH", pathJoin(base, "share", "man"))
 EOF
     printf 'Wrote modulefile: %s\n' "$MODULE_FILE"
@@ -181,6 +288,7 @@ configure_build() {
         -DCMAKE_INSTALL_PREFIX="$PREFIX"
         -DCMAKE_INSTALL_LIBDIR=lib64
         -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+        -DBUILD_SHARED_LIBS=ON
         -DLLAMA_BUILD_TESTS=OFF
         -DLLAMA_BUILD_EXAMPLES=ON
         -DLLAMA_BUILD_SERVER=ON
@@ -199,12 +307,12 @@ prepare_source() {
     mkdir -p "$(dirname "$SOURCE_DIR")"
     if [[ ! -d "$SOURCE_DIR/.git" ]]; then
         [[ ! -e "$SOURCE_DIR" ]] || die "Source path exists but is not a Git checkout: $SOURCE_DIR"
-        git clone --branch "$REF" --depth 1 https://github.com/ggml-org/llama.cpp.git "$SOURCE_DIR"
-    else
-        git -C "$SOURCE_DIR" fetch --tags origin
-        git -C "$SOURCE_DIR" checkout "$REF"
-        git -C "$SOURCE_DIR" pull --ff-only origin "$REF" || true
+        git init "$SOURCE_DIR"
+        git -C "$SOURCE_DIR" remote add origin https://github.com/ggml-org/llama.cpp.git
     fi
+
+    git -C "$SOURCE_DIR" fetch --depth 1 origin "$REF"
+    git -C "$SOURCE_DIR" checkout --detach FETCH_HEAD
 }
 
 build() {
@@ -244,6 +352,7 @@ clean() {
     rm -rf "$SOURCE_DIR"
 }
 
+preload_config "$@"
 parse_args "$@"
 [[ "$COMMAND" == "help" ]] && { usage; exit 0; }
 set_paths

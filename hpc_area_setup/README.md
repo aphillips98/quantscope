@@ -43,6 +43,7 @@ The installer can also load them itself:
 
 | Goal | Command |
 | --- | --- |
+| Build from a named config | `./install_llamacpp.sh --config EPYC_node` |
 | Portable CPU build | `./install_llamacpp.sh build --profile CPU` |
 | Node-optimized CPU build | `./install_llamacpp.sh build --profile EPYC --native` |
 | CUDA build | `./install_llamacpp.sh build --profile DGX --cuda --cuda-architectures "80;90"` |
@@ -51,6 +52,34 @@ The installer can also load them itself:
 | Uninstall without confirmation | `./install_llamacpp.sh uninstall --profile DGX --cuda --yes` |
 
 `--profile` is determined, in order, by `HPC_PROFILE`, `SLURM_JOB_PARTITION` and finally `default`. On clusters with uninformative partition names, set `--profile` explicitly so the module path stays stable.
+
+### Installation configs
+
+Named configs are plain `key=value` files under `configs/`. Pass either a name, which resolves to `configs/NAME.conf`, or a file path:
+
+```bash
+./install_llamacpp.sh --config EPYC_node
+./install_llamacpp.sh --config /path/to/custom.conf
+```
+
+The included `configs/EPYC_node.conf` pins the `llama.cpp` commit used by `llama-cpp-python 0.3.35`. Command-line options override config values:
+
+```bash
+./install_llamacpp.sh --config EPYC_node --jobs 16
+```
+
+Supported keys are `command`, `profile`, `prefix`, `module_root`, `source_dir`, `version`, `ref`, `jobs`, `build_type`, `cuda`, `native`, `cuda_architectures`, `assume_yes`, and `load_module`. Boolean values accept `true` or `false`; repeat `load_module` for multiple environment modules. Blank lines and `#` comments are ignored, and `~/` is expanded to the current user's home directory.
+
+```ini
+command=build
+profile=EPYC
+version=py035
+ref=4df29be4f4c3673f428170fda944a5b19f743bb8
+native=true
+cuda=false
+load_module=gcc
+load_module=cmake
+```
 
 The CPU build is portable by default. Use `--native` only when the binary will run on nodes with the same microarchitecture. For CUDA, specifying `--cuda-architectures` minimizes build time and produces binaries suited to the target GPUs, e.g. `70`, `80` or `90`.
 

@@ -10,6 +10,8 @@ cd "$SCRIPT_DIR"
 INSTALL_DEV=0
 INSTALL_ALL=0
 DRY_RUN=0
+VENV_DIR=".venv"
+PROFILE=""
 EXTRA_MODULES=()
 
 usage() {
@@ -18,14 +20,14 @@ Usage: ${PROGRAM_NAME} [options]
 
 Options:
   --dev         Include development and test dependencies (pytest, etc.)
-  --all         Install all backend dependencies (llamacpp, transformers, vllm, deepeval, telemetry)
+    --all         Install all backend dependencies except llama-cpp-python
+  --profile NAME  Install into .venv-NAME (one venv per hardware profile; used by slurm/submit.sh)
   --dry-run     Show detected backends and generated install command without executing
   -h, --help    Show this help message
 
 Environment Detection:
   - Detects loaded Lua/Lmod modules via \$LOADEDMODULES / \$_LMFILES_
-    - If a llamacpp module is loaded (or llama-server is in PATH), enables the llamacpp extra
-        and builds a native library compatible with the installed Python binding
+    - Detects llama-server in PATH; llama-cpp-python is never installed by this script
   - If a CUDA module is loaded (or nvcc is in PATH), enables CUDA support and transformers/vllm
 EOF
 }
@@ -34,6 +36,7 @@ while (($# > 0)); do
     case "$1" in
         --dev) INSTALL_DEV=1; shift ;;
         --all) INSTALL_ALL=1; shift ;;
+        --profile) PROFILE="${2:?--profile requires a value}"; VENV_DIR=".venv-${PROFILE}"; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) printf 'Error: unknown option: %s\n' "$1" >&2; usage >&2; exit 1 ;;
@@ -61,29 +64,35 @@ EXTRAS=("deepeval" "telemetry")
 
 # 1. Detect CUDA
 HAS_CUDA=0
-if [[ "$LOADED" =~ (cuda|CUDA) ]] || command -v nvcc >/dev/null 2>&1; then
+CUDA_ARCH=""
+case "$PROFILE" in
+    a100) CUDA_ARCH=80 ;;
+    h100) CUDA_ARCH=90 ;;
+    gpu|v100) CUDA_ARCH=70 ;;
+esac
+if [[ -n "$CUDA_ARCH" || "$LOADED" =~ (cuda|CUDA) ]] || command -v nvcc >/dev/null 2>&1; then
     HAS_CUDA=1
     printf '==> Detected CUDA environment\n'
 fi
 
-# 2. Detect llama.cpp prebuilt module / binaries
-HAS_LLAMACPP=0
-if [[ "$LOADED" =~ llamacpp ]] || command -v llama-server >/dev/null 2>&1 || [[ -n "${LLAMA_CPP_LIB:-}" ]]; then
-    HAS_LLAMACPP=1
-    EXTRAS+=("llamacpp")
-    printf '==> Detected llama.cpp module / prebuilt binary\n'
-
-    printf '   Rebuilding llama-cpp-python native library for the installed Python binding\n'
+# 2. Prefer the module-provided llama.cpp server
+HAS_LLAMASERVER=0
+if command -v llama-server >/dev/null 2>&1; then
+    HAS_LLAMASERVER=1
+    printf '==> Detected llama-server\n'
+else
+    printf 'Error: llama-server is required; aborting before creating a virtual environment.\n' >&2
+    exit 1
 fi
 
 # 3. Detect transformers / vllm or install --all
 if ((INSTALL_ALL)); then
-    for extra in llamacpp transformers vllm; do
+    for extra in transformers vllm; do
         if [[ ! " ${EXTRAS[*]} " =~ " ${extra} " ]]; then
             EXTRAS+=("$extra")
         fi
     done
-elif ((HAS_CUDA)); then
+elif ((HAS_CUDA && !HAS_LLAMASERVER)); then
     if [[ ! " ${EXTRAS[*]} " =~ " transformers " ]]; then
         EXTRAS+=("transformers")
     fi
@@ -95,33 +104,28 @@ fi
 
 EXTRAS_JOINED="$(IFS=,; echo "${EXTRAS[*]}")"
 printf 'Installing packages with extras: [%s]\n' "$EXTRAS_JOINED"
+CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+export CMAKE_BUILD_PARALLEL_LEVEL
 
 if ((DRY_RUN)); then
     printf '\n[Dry Run] Would execute:\n'
-    printf '  uv venv .venv\n'
-    printf '  source .venv/bin/activate\n'
-    if ((HAS_LLAMACPP)); then
-        printf '  uv pip install --reinstall-package llama-cpp-python --no-binary llama-cpp-python -e ".[%s]"\n' "$EXTRAS_JOINED"
-    else
-        printf '  uv pip install -e ".[%s]"\n' "$EXTRAS_JOINED"
-    fi
+    printf '  uv venv --managed-python --python %s %s\n' "${PYTHON_VERSION:-3.12}" "$VENV_DIR"
+    printf '  source %s/bin/activate\n' "$VENV_DIR"
+    printf '  uv pip install -e ".[%s]"\n' "$EXTRAS_JOINED"
     exit 0
 fi
 
 # Create and activate venv
-if [[ ! -d ".venv" ]]; then
-    printf 'Creating virtual environment in .venv...\n'
-    uv venv .venv
+if [[ ! -d "$VENV_DIR" ]]; then
+    printf 'Creating virtual environment in %s...\n' "$VENV_DIR"
+    # Managed Python lives in $HOME (shared); /usr/bin/python3 differs between login and compute nodes.
+    uv venv --managed-python --python "${PYTHON_VERSION:-3.12}" "$VENV_DIR"
 fi
 
 # shellcheck disable=SC1091
-source .venv/bin/activate
+source "$VENV_DIR/bin/activate"
 
 # Execute installation
-if ((HAS_LLAMACPP)); then
-    uv pip install --reinstall-package llama-cpp-python --no-binary llama-cpp-python -e ".[${EXTRAS_JOINED}]"
-else
-    uv pip install -e ".[${EXTRAS_JOINED}]"
-fi
+uv pip install -e ".[${EXTRAS_JOINED}]"
 
-printf '\nInstallation completed successfully in .venv (extras: %s).\n' "$EXTRAS_JOINED"
+printf '\nInstallation completed successfully in %s (extras: %s).\n' "$VENV_DIR" "$EXTRAS_JOINED"

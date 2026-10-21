@@ -1,0 +1,30 @@
+version: 1
+name: a100
+models:
+  - llama3.1-8b-q4_k_m
+  - phi-3.5-mini-3.8b-q4_k_m
+  - gemma-2-9b-it-q4_k_m
+  - mistral-7b-instruct-v0.3-q4_k_m
+hardware_profile: a100
+repetitions: 1
+seed: 42
+capture_predictions: true
+scoring: [exact_match]
+benchmarks:
+  mmlu:
+    shots: 5
+    tasks: [high_school_computer_science]
+    max_samples: 5
+  hellaswag:
+    shots: 5
+    tasks: [applying_sunscreen]
+    max_samples: 5
+telemetry:
+  require_energy: true
+  sample_interval_seconds: 1.0
+profiling:
+  enabled: true
+  mode: direct
+  library_path: ${HOME}/.local/programs/A100/nvidia-profiling/lib/nvidia-process-metrics/libnvidia-process-metrics.so
+  device: 0
+  window_ms: 200

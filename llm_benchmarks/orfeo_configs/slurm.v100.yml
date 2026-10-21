@@ -1,0 +1,5 @@
+models: configs/models.yml
+campaign: configs/campaigns/v100.yml
+hardware: configs/hardware_profiles.yml
+output_dir: ./artifacts/slurm-smoke
+dry_run: true

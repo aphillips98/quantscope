@@ -1,21 +1,5 @@
 version: 1
 profiles:
-  dgx002_cpu:
-    scheduler:
-      partition: A100
-      nodelist: dgx002
-      cpus_per_task: 32
-      memory: 100G
-      time: "2:00:00"
-    modules: []
-  dgx003_cpu:
-    scheduler:
-      partition: H100
-      nodelist: dgx003
-      cpus_per_task: 32
-      memory: 100G
-      time: "2:00:00"
-    modules: []
   epyc_cpu:
     scheduler:
       partition: EPYC
@@ -23,31 +7,21 @@ profiles:
       cpus_per_task: 32
       memory: 100GB
       time: "12:00:00"
-    modules: []
-  gpu:
-    scheduler:
-      partition: GPU
-      nodelist: gpu002
-      gres: gpu:V100:1
-      cpus_per_task: 16
-      memory: 64G
-      time: "2:00:00"
-    modules: [cuda]
+    modules: [EPYC/llamacpp/py035]
   a100:
     scheduler:
-      partition: A100
-      gpus: gpu:a100:1
+      partition: DGX
+      gres: gpu:A100:1
       cpus_per_task: 16
       memory: 100G
       time: "08:00:00"
-    modules: [cuda]
-  h100:
+    modules: [cuda, A100/llamacpp_cuda/py035, A100/nvidia-profiling/1]
+  v100:
     scheduler:
-      account: dssc
-      partition: H100
-      nodelist: dgx003
-      gres: gpu:H100:1
+      partition: GPU
+      gres: gpu:V100:1
       cpus_per_task: 16
       memory: 100G
-      time: "2:00:00"
-    modules: [cuda]
+      time: "08:00:00"
+      account: external
+    modules: [cuda, V100/llamacpp_cuda/py035, V100/nvidia-profiling/1]

@@ -14,3 +14,9 @@ benchmarks:
 telemetry:
   require_energy: false
   sample_interval_seconds: 1.0
+profiling:
+  enabled: false
+  mode: direct
+  library_path: ${HOME}/.local/programs/A100/nvidia-profiling/lib/nvidia-process-metrics/libnvidia-process-metrics.so
+  device: 0
+  window_ms: 200

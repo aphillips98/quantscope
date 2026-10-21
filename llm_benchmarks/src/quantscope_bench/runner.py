@@ -29,6 +29,7 @@ def evaluate_samples(
     samples: Iterable[MultipleChoiceSample],
     scoring_methods: tuple[str, ...],
     run_id: str,
+    model_name: str = "",
 ) -> list[SampleResult]:
     """Evaluate samples once per selected scoring method."""
     results: list[SampleResult] = []
@@ -51,6 +52,7 @@ def evaluate_samples(
                     correct=exact_match(response, sample.expected_choice),
                     latency_seconds=latency,
                     raw_response=response,
+                    model_name=model_name,
                 )
             )
             LOGGER.debug("Completed exact_match for sample %s in %.3fs", sample.sample_id, latency)
@@ -74,6 +76,7 @@ def evaluate_samples(
                     correct=prediction == sample.expected_choice,
                     latency_seconds=latency,
                     option_scores=tuple(scores),
+                    model_name=model_name,
                 )
             )
             LOGGER.debug("Completed log_likelihood for sample %s in %.3fs", sample.sample_id, latency)

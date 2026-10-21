@@ -13,7 +13,7 @@ from quantscope_bench.scoring import normalize_choice
 LOGGER = logging.getLogger(__name__)
 
 def run_deepeval_campaign(
-    adapter: ModelAdapter, campaign: dict[str, Any], run_id: str
+    adapter: ModelAdapter, campaign: dict[str, Any], run_id: str, model_name: str = ""
 ) -> tuple[list[SampleResult], dict[str, Any]]:
     """Run configured DeepEval suites and normalize their public result frames."""
     try:
@@ -36,7 +36,9 @@ def run_deepeval_campaign(
         benchmark = benchmark_type(tasks=tasks or None, n_shots=options.get("shots", 0))
         benchmark.evaluate(model=bridge, batch_size=options.get("batch_size", 1))
         metadata["benchmark_scores"][name] = float(benchmark.overall_score)
-        benchmark_results = _normalize_predictions(benchmark.predictions, name, run_id)
+        benchmark_results = _normalize_predictions(
+            benchmark.predictions, name, run_id, model_name
+        )
         all_results.extend(benchmark_results)
         LOGGER.info(
             "Completed %s benchmark: score=%.4f samples=%d",
@@ -75,7 +77,9 @@ def _resolve_task(task_type: type, task_name: str) -> Any:
         raise RuntimeError(f"Unknown DeepEval task {task_name!r} for {task_type.__name__}") from error
 
 
-def _normalize_predictions(predictions: Any, benchmark: str, run_id: str) -> list[SampleResult]:
+def _normalize_predictions(
+    predictions: Any, benchmark: str, run_id: str, model_name: str = ""
+) -> list[SampleResult]:
     records = predictions.to_dict("records")
     normalized: list[SampleResult] = []
     for index, record in enumerate(records):
@@ -95,6 +99,7 @@ def _normalize_predictions(predictions: Any, benchmark: str, run_id: str) -> lis
                 correct=correct,
                 latency_seconds=0.0,
                 raw_response=raw_prediction,
+                model_name=model_name,
             )
         )
     return normalized

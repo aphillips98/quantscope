@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from quantscope_bench.telemetry.nvidia_profiling import NvidiaProfilingConfig
 
 SUPPORTED_BACKENDS = frozenset({"llamacpp", "transformers", "vllm"})
 SUPPORTED_BENCHMARKS = frozenset({"mmlu", "hellaswag"})
@@ -23,6 +24,7 @@ class ConfigurationError(ValueError):
 @dataclass(frozen=True)
 class ValidatedCampaign:
     model_name: str
+    model_names: tuple[str, ...]
     backend: str
     profile_name: str
     benchmark_names: tuple[str, ...]
@@ -54,25 +56,34 @@ def validate_campaign(
     _require_version(campaign, "campaign")
     _require_version(hardware, "hardware")
 
-    model_name = _required_string(campaign, "model", "campaign")
+    if "model" in campaign and "models" in campaign:
+        raise ConfigurationError("campaign must specify either model or models, not both")
+    if "models" in campaign:
+        model_names = tuple(_string_list(campaign, "models", "campaign"))
+    else:
+        model_names = (_required_string(campaign, "model", "campaign"),)
+    if len(set(model_names)) != len(model_names):
+        raise ConfigurationError("campaign models must not contain duplicates")
     profile_name = _required_string(campaign, "hardware_profile", "campaign")
     model_entries = _required_mapping(models, "models", "models")
     profile_entries = _required_mapping(hardware, "profiles", "hardware")
 
-    model = _named_mapping(model_entries, model_name, "model")
     _named_mapping(profile_entries, profile_name, "hardware profile")
-    backend = _required_string(model, "backend", f"model {model_name}")
-    if backend not in SUPPORTED_BACKENDS:
-        raise ConfigurationError(
-            f"model {model_name} has unsupported backend {backend!r}; "
-            f"expected one of {sorted(SUPPORTED_BACKENDS)}"
-        )
-
-    sources = [key for key in ("local_path", "hf_id") if model.get(key)]
-    if len(sources) != 1:
-        raise ConfigurationError(
-            f"model {model_name} must specify exactly one of local_path or hf_id"
-        )
+    backends: list[str] = []
+    for model_name in model_names:
+        model = _named_mapping(model_entries, model_name, "model")
+        backend = _required_string(model, "backend", f"model {model_name}")
+        if backend not in SUPPORTED_BACKENDS:
+            raise ConfigurationError(
+                f"model {model_name} has unsupported backend {backend!r}; "
+                f"expected one of {sorted(SUPPORTED_BACKENDS)}"
+            )
+        sources = [key for key in ("local_path", "hf_id") if model.get(key)]
+        if len(sources) != 1:
+            raise ConfigurationError(
+                f"model {model_name} must specify exactly one of local_path or hf_id"
+            )
+        backends.append(backend)
 
     scoring_methods = _string_list(campaign, "scoring", "campaign")
     invalid_scoring = set(scoring_methods) - SUPPORTED_SCORING
@@ -101,17 +112,22 @@ def validate_campaign(
     repetitions = campaign.get("repetitions", 1)
     if not isinstance(repetitions, int) or isinstance(repetitions, bool) or repetitions < 1:
         raise ConfigurationError("campaign repetitions must be a positive integer")
+    try:
+        NvidiaProfilingConfig.from_mapping(campaign.get("profiling"))
+    except ValueError as error:
+        raise ConfigurationError(str(error)) from error
 
     validated = ValidatedCampaign(
-        model_name=model_name,
-        backend=backend,
+        model_name=model_names[0],
+        model_names=model_names,
+        backend=backends[0] if len(set(backends)) == 1 else "multiple",
         profile_name=profile_name,
         benchmark_names=tuple(benchmark_names),
         scoring_methods=tuple(scoring_methods),
     )
     LOGGER.debug(
-        "Campaign validation complete: model=%s backend=%s benchmarks=%s",
-        validated.model_name,
+        "Campaign validation complete: models=%s backend=%s benchmarks=%s",
+        ",".join(validated.model_names),
         validated.backend,
         ",".join(validated.benchmark_names),
     )

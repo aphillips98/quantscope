@@ -26,6 +26,8 @@ class LlamaCppAdapter(ModelAdapter):
         if flash_attention not in ("on", "off", "auto"):
             raise ValueError("inference.flash_attention must be on, off, auto, or a boolean")
         self._flash_attention = flash_attention
+        self._max_tokens = inference.get("max_tokens", 1)
+        self._seed = inference.get("seed")
         self._server_process: subprocess.Popen[bytes] | None = None
         self.performance_requests: list[dict[str, Any]] = []
         server = shutil.which("llama-server")
@@ -52,15 +54,17 @@ class LlamaCppAdapter(ModelAdapter):
 
     def generate(self, prompt: str, max_tokens: int = 1) -> str:
         started = time.perf_counter()
+        generation_tokens = self._max_tokens if max_tokens == 1 else max_tokens
         if self._server_process is not None:
-            payload = json.dumps(
-                {
-                    "prompt": prompt,
-                    "n_predict": max_tokens,
-                    "temperature": self._temperature,
-                    "stop": ["\n"],
-                }
-            ).encode("utf-8")
+            completion: dict[str, Any] = {
+                "prompt": prompt,
+                "n_predict": generation_tokens,
+                "temperature": self._temperature,
+                "stop": ["\n"],
+            }
+            if self._seed is not None:
+                completion["seed"] = self._seed
+            payload = json.dumps(completion).encode("utf-8")
             request = Request(
                 f"{self._base_url}/completion",
                 data=payload,
@@ -75,9 +79,10 @@ class LlamaCppAdapter(ModelAdapter):
 
         response = self._model.create_completion(
             prompt=prompt,
-            max_tokens=max_tokens,
+            max_tokens=generation_tokens,
             temperature=self._temperature,
             stop=["\n"],
+            **({"seed": self._seed} if self._seed is not None else {}),
         )
         text = str(response["choices"][0]["text"])
         self._record_performance(started, response, "llama-cpp-python")

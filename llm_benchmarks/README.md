@@ -94,6 +94,8 @@ models:
     inference:
       context_size: 4096
       temperature: 0.0
+      max_tokens: 1
+      seed: 42
 
   hf-model:
     backend: transformers

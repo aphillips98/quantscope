@@ -49,7 +49,10 @@ class LlamaServerAdapterTests(unittest.TestCase):
 
         with patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "0"}):
             adapter = LlamaCppAdapter(
-                {"local_path": "model.gguf", "inference": {"context_size": 2048}}
+                {
+                    "local_path": "model.gguf",
+                    "inference": {"context_size": 2048, "max_tokens": 8, "seed": 42},
+                }
             )
         self.assertEqual(adapter.generate("Question"), "A")
         adapter.close()
@@ -59,6 +62,9 @@ class LlamaServerAdapterTests(unittest.TestCase):
         self.assertIn("-1", command)
         self.assertEqual(command[command.index("--flash-attn") + 1], "off")
         self.assertTrue(urlopen.call_args_list[1].args[0].full_url.endswith("/completion"))
+        payload = json.loads(urlopen.call_args_list[1].args[0].data)
+        self.assertEqual(payload["n_predict"], 8)
+        self.assertEqual(payload["seed"], 42)
         process.terminate.assert_called_once_with()
         self.assertEqual(len(adapter.performance_requests), 1)
         self.assertIsNone(adapter.performance_requests[0]["prompt_tokens"])
@@ -72,6 +78,8 @@ class LlamaServerAdapterTests(unittest.TestCase):
         adapter._server_process = MagicMock()
         adapter._base_url = "http://localhost:1234"
         adapter._temperature = 0.0
+        adapter._max_tokens = 1
+        adapter._seed = None
         adapter.performance_requests = []
         urlopen.return_value.__enter__.return_value.read.return_value = json.dumps(
             {"content": " B", "timings": {"prompt_n": 100, "predicted_n": 2,
@@ -90,6 +98,8 @@ class LlamaServerAdapterTests(unittest.TestCase):
         adapter = LlamaCppAdapter.__new__(LlamaCppAdapter)
         adapter._server_process = None
         adapter._temperature = 0.0
+        adapter._max_tokens = 1
+        adapter._seed = None
         adapter.performance_requests = []
         adapter._model = MagicMock()
         adapter._model.create_completion.return_value = {
@@ -101,6 +111,39 @@ class LlamaServerAdapterTests(unittest.TestCase):
         self.assertEqual(measurement["latency_seconds"], 0.5)
         self.assertEqual(measurement["generated_tokens"], 1)
         self.assertIsNone(measurement["generation_seconds"])
+
+    @patch("quantscope_bench.adapters.llamacpp.time.perf_counter", side_effect=[10.0, 10.5])
+    def test_python_fallback_uses_configured_max_tokens_and_seed(self, _clock: MagicMock) -> None:
+        adapter = LlamaCppAdapter.__new__(LlamaCppAdapter)
+        adapter._server_process = None
+        adapter._temperature = 0.0
+        adapter._max_tokens = 8
+        adapter._seed = 42
+        adapter.performance_requests = []
+        adapter._model = MagicMock()
+        adapter._model.create_completion.return_value = {"choices": [{"text": "A"}]}
+
+        self.assertEqual(adapter.generate("Question"), "A")
+        adapter._model.create_completion.assert_called_once_with(
+            prompt="Question", max_tokens=8, temperature=0.0, stop=["\n"], seed=42
+        )
+
+    @patch("quantscope_bench.adapters.llamacpp.time.perf_counter", side_effect=[10.0, 10.5])
+    def test_generate_argument_overrides_configured_max_tokens(self, _clock: MagicMock) -> None:
+        adapter = LlamaCppAdapter.__new__(LlamaCppAdapter)
+        adapter._server_process = None
+        adapter._temperature = 0.0
+        adapter._max_tokens = 8
+        adapter._seed = None
+        adapter.performance_requests = []
+        adapter._model = MagicMock()
+        adapter._model.create_completion.return_value = {"choices": [{"text": "A"}]}
+
+        adapter.generate("Question", max_tokens=3)
+
+        adapter._model.create_completion.assert_called_once_with(
+            prompt="Question", max_tokens=3, temperature=0.0, stop=["\n"]
+        )
 
     @patch("quantscope_bench.adapters.llamacpp.urlopen")
     @patch("quantscope_bench.adapters.llamacpp.subprocess.Popen")

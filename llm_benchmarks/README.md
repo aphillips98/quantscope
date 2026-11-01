@@ -94,7 +94,7 @@ models:
     inference:
       context_size: 4096
       temperature: 0.0
-      max_tokens: 1
+      max_tokens: 8
       seed: 42
 
   hf-model:
@@ -199,6 +199,12 @@ Valid campaign: model=local-gguf backend=llamacpp profile=cpu benchmarks=mmlu,he
 
 Logging is disabled by default. Add `--log-level INFO` for campaign progress or
 `--log-level DEBUG` for per-sample timing and adapter details to either command.
+The default threshold remains `CRITICAL`; the available levels are `CRITICAL`,
+`ERROR`, `WARNING`, `INFO`, and `DEBUG`. Shared formatting and colors are defined
+in [logging_config.py](src/quantscope_bench/logging_config.py). Interactive stderr
+uses cyan for `DEBUG`, green for `INFO`, yellow for `WARNING`, red for `ERROR`,
+and bold red for `CRITICAL`. Redirected output stays plain text. Set `NO_COLOR`
+(even to an empty value) or `TERM=dumb` to disable colors in a terminal.
 
 ## Run a campaign
 
@@ -390,6 +396,75 @@ qscope-bench validate \
   --campaign configs/campaigns/my-run.yml \
   --hardware configs/hardware.yml
 ```
+
+## EfiMon campaign monitoring
+
+EfiMon is an optional telemetry adapter, independent of the inference backend.
+Install `efimon-launcher` in `PATH` and arrange for an administrator to start
+`efimon-daemon` on the same node (default TCP port 5550). The benchmark never
+starts the daemon or invokes `sudo`. The daemon must be able to write to the
+benchmark output directory, and the benchmark user must be able to read its files.
+No additional Python packages are required.
+
+Use [the EfiMon campaign example](configs/campaigns/efimon.example.yml) or add:
+
+```yaml
+efimon:
+  enabled: true
+  launcher: efimon-launcher
+  port: 5550
+  sample_interval_seconds: 3
+  discovery_interval_seconds: 0.5
+  startup_timeout_seconds: 10
+  shutdown_timeout_seconds: 15
+```
+
+`sample_interval_seconds` is a positive integer, matching the launcher's
+second-based `--delay` option. Discovery and timeout values accept positive
+fractional seconds. `launcher` also accepts an executable path.
+
+Choose collectors with their independent switches:
+
+| Collection | `efimon.enabled` | `profiling.enabled` |
+|------------|------------------|---------------------|
+| EfiMon only | `true` | `false` |
+| NVIDIA only | `false` | `true` |
+| Both | `true` | `true` |
+| Neither | `false` | `false` |
+
+When NVIDIA profiling is enabled, its existing `library_path` and mode-specific
+settings are still required. Existing campaigns are unchanged; EfiMon defaults
+to disabled. The `validate` command checks configuration without contacting
+the daemon.
+
+The capture spans the campaign, including model loading and evaluation.
+The monitor attaches to the CLI PID, discovers descendants through Linux
+`/proc`, and attaches a separate launcher to each new PID, including
+`llama-server`. Launchers are excluded from discovery. This compensates for
+EfiMon's startup-only child enumeration without modifying EfiMon. Discovery
+is best-effort: processes shorter than the discovery/startup interval and
+children reparented before discovery can be missed. Monitoring also adds overhead.
+Assembly/perf analysis is disabled to avoid interfering with the workload.
+
+Each invocation preserves raw daemon CSV files and launcher logs under a unique
+`efimon/capture-.../` directory. Its `summary.json` contains per-PID capture status,
+errors, sample counts and min/max/mean for each native numeric field; the same
+summary is added to `metadata.json` when benchmark metadata exists.
+Field names and units remain those of the installed EfiMon version. CPU usage,
+socket frequency, RAPL/IPMI power and other fields depend on its build and
+hardware. System power fields are not process-attributed: they are **not**
+summed across PID captures or converted into total campaign energy. Missing
+fields are not synthesized, and values emitted as zero by EfiMon cannot be
+distinguished from genuine zero measurements by this adapter.
+
+If a launcher is missing, the daemon does not respond, a capture fails or no
+samples are produced (for example, for a very short process), a warning is
+printed even at the default CLI log level and the summary is marked `failed`.
+The benchmark continues with its own exit status; it is never rerun as a
+fallback. On shutdown the adapter sends SIGINT only to its own launchers and
+waits for daemon output to flush. If a launcher hangs past the shutdown
+timeout, it is killed and a warning notes that its daemon session may require
+administrator cleanup. The shared daemon is never stopped.
 
 ## Project status
 

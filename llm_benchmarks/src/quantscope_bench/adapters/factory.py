@@ -16,13 +16,16 @@ def create_adapter(model: dict[str, Any]) -> ModelAdapter:
     if backend == "llamacpp":
         from quantscope_bench.adapters.llamacpp import LlamaCppAdapter
 
+        LOGGER.debug("Creating LlamaCppAdapter")
         return LlamaCppAdapter(model)
     if backend == "transformers":
         from quantscope_bench.adapters.transformers import TransformersAdapter
 
+        LOGGER.debug("Creating TransformersAdapter")
         return TransformersAdapter(model)
     if backend == "vllm":
         from quantscope_bench.adapters.vllm import VllmAdapter
 
+        LOGGER.debug("Creating VllmAdapter")
         return VllmAdapter(model)
     raise ConfigurationError(f"Unsupported backend: {backend}")

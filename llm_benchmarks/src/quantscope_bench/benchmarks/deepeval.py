@@ -33,12 +33,20 @@ def run_deepeval_campaign(
         task_type = MMLUTask if name == "mmlu" else HellaSwagTask
         benchmark_type = MMLU if name == "mmlu" else HellaSwag
         tasks = [_resolve_task(task_type, task) for task in options.get("tasks", [])]
+        LOGGER.debug(
+            "Configured %s with %d explicit task(s), shots=%s, batch_size=%s",
+            name,
+            len(tasks),
+            options.get("shots", 0),
+            options.get("batch_size", 1),
+        )
         benchmark = benchmark_type(tasks=tasks or None, n_shots=options.get("shots", 0))
         benchmark.evaluate(model=bridge, batch_size=options.get("batch_size", 1))
         metadata["benchmark_scores"][name] = float(benchmark.overall_score)
         benchmark_results = _normalize_predictions(
             benchmark.predictions, name, run_id, model_name
         )
+
         all_results.extend(benchmark_results)
         LOGGER.info(
             "Completed %s benchmark: score=%.4f samples=%d",
@@ -55,10 +63,11 @@ def _make_deepeval_model(base_class: type, adapter: ModelAdapter) -> Any:
             return adapter
 
         def generate(self, prompt: str) -> str:
-            return adapter.generate(prompt)
+            raw = adapter.generate(prompt)
+            return normalize_choice(raw) or raw.strip()
 
         def batch_generate(self, prompts: list[str]) -> list[str]:
-            return [normalize_choice(adapter.generate(prompt)) for prompt in prompts]
+            return [self.generate(prompt) for prompt in prompts]
 
         async def a_generate(self, prompt: str) -> str:
             return await asyncio.to_thread(self.generate, prompt)
@@ -71,6 +80,7 @@ def _make_deepeval_model(base_class: type, adapter: ModelAdapter) -> Any:
 
 def _resolve_task(task_type: type, task_name: str) -> Any:
     enum_name = task_name.upper().replace("-", "_").replace(" ", "_")
+    LOGGER.debug("Resolving DeepEval task %r to %s.%s", task_name, task_type.__name__, enum_name)
     try:
         return getattr(task_type, enum_name)
     except AttributeError as error:
@@ -81,6 +91,7 @@ def _normalize_predictions(
     predictions: Any, benchmark: str, run_id: str, model_name: str = ""
 ) -> list[SampleResult]:
     records = predictions.to_dict("records")
+    LOGGER.debug("Normalizing %d DeepEval prediction record(s) for %s", len(records), benchmark)
     normalized: list[SampleResult] = []
     for index, record in enumerate(records):
         task = str(record.get("Task", record.get("task", "unknown")))

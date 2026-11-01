@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import socket
@@ -13,6 +14,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from quantscope_bench.adapters.base import AdapterCapabilities, ModelAdapter
+
+LOGGER = logging.getLogger(__name__)
 
 
 class LlamaCppAdapter(ModelAdapter):
@@ -26,16 +29,18 @@ class LlamaCppAdapter(ModelAdapter):
         if flash_attention not in ("on", "off", "auto"):
             raise ValueError("inference.flash_attention must be on, off, auto, or a boolean")
         self._flash_attention = flash_attention
-        self._max_tokens = inference.get("max_tokens", 1)
+        self._max_tokens = inference.get("max_tokens", 8)
         self._seed = inference.get("seed")
         self._server_process: subprocess.Popen[bytes] | None = None
         self.performance_requests: list[dict[str, Any]] = []
         server = shutil.which("llama-server")
         if server:
+            LOGGER.debug("Using llama-server binary at %s", server)
             self._temperature = inference.get("temperature", 0.0)
             self._base_url = self._start_server(server, model, inference)
             return
 
+        LOGGER.debug("llama-server not found; falling back to in-process llama-cpp-python")
         try:
             from llama_cpp import Llama
         except ImportError as error:
@@ -43,6 +48,13 @@ class LlamaCppAdapter(ModelAdapter):
                 "llama.cpp backend requires `pip install -e '.[llamacpp]'`"
             ) from error
 
+        LOGGER.debug(
+            "Loading GGUF model %s (context_size=%s, gpu_layers=%s, flash_attn=%s)",
+            model["local_path"],
+            inference.get("context_size", 4096),
+            inference.get("gpu_layers", 0),
+            self._flash_attention,
+        )
         self._model = Llama(
             model_path=model["local_path"],
             n_ctx=inference.get("context_size", 4096),
@@ -55,12 +67,17 @@ class LlamaCppAdapter(ModelAdapter):
     def generate(self, prompt: str, max_tokens: int = 1) -> str:
         started = time.perf_counter()
         generation_tokens = self._max_tokens if max_tokens == 1 else max_tokens
+        LOGGER.debug(
+            "Generating completion: prompt_chars=%d max_tokens=%d via %s",
+            len(prompt),
+            generation_tokens,
+            "llama-server" if self._server_process is not None else "llama-cpp-python",
+        )
         if self._server_process is not None:
             completion: dict[str, Any] = {
                 "prompt": prompt,
                 "n_predict": generation_tokens,
                 "temperature": self._temperature,
-                "stop": ["\n"],
             }
             if self._seed is not None:
                 completion["seed"] = self._seed
@@ -81,7 +98,6 @@ class LlamaCppAdapter(ModelAdapter):
             prompt=prompt,
             max_tokens=generation_tokens,
             temperature=self._temperature,
-            stop=["\n"],
             **({"seed": self._seed} if self._seed is not None else {}),
         )
         text = str(response["choices"][0]["text"])
@@ -115,15 +131,25 @@ class LlamaCppAdapter(ModelAdapter):
             {"request_id": len(self.performance_requests), "backend": backend,
              "latency_seconds": latency, **values}
         )
+        LOGGER.debug(
+            "Recorded %s request %d: latency=%.3fs prompt_tokens=%s generated_tokens=%s",
+            backend,
+            len(self.performance_requests) - 1,
+            latency,
+            values["prompt_tokens"],
+            values["generated_tokens"],
+        )
 
     def close(self) -> None:
         process = getattr(self, "_server_process", None)
         if process is None or process.poll() is not None:
             return
+        LOGGER.debug("Terminating llama-server process %d", process.pid)
         process.terminate()
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
+            LOGGER.debug("llama-server did not terminate in time; killing process %d", process.pid)
             process.kill()
             process.wait()
 
@@ -153,6 +179,7 @@ class LlamaCppAdapter(ModelAdapter):
             self._flash_attention,
         ]
         self._server_process = subprocess.Popen(command, stdout=subprocess.DEVNULL)
+        LOGGER.debug("Started llama-server pid %d at %s", self._server_process.pid, base_url)
         deadline = time.monotonic() + inference.get("startup_timeout", 300)
         while time.monotonic() < deadline:
             if self._server_process.poll() is not None:
@@ -162,8 +189,10 @@ class LlamaCppAdapter(ModelAdapter):
             try:
                 with urlopen(f"{base_url}/health", timeout=2) as response:
                     if response.status == 200:
+                        LOGGER.debug("llama-server is healthy at %s", base_url)
                         return base_url
             except (HTTPError, URLError, TimeoutError):
+                LOGGER.debug("llama-server not ready yet; retrying health check at %s", base_url)
                 time.sleep(1)
         self.close()
         raise RuntimeError(

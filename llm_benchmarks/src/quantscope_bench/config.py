@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from quantscope_bench.telemetry.efimon import EfimonConfig
 from quantscope_bench.telemetry.nvidia_profiling import NvidiaProfilingConfig
 
 SUPPORTED_BACKENDS = frozenset({"llamacpp", "transformers", "vllm"})
@@ -62,6 +63,7 @@ def validate_campaign(
         model_names = tuple(_string_list(campaign, "models", "campaign"))
     else:
         model_names = (_required_string(campaign, "model", "campaign"),)
+    LOGGER.debug("Campaign declares %d model(s): %s", len(model_names), ",".join(model_names))
     if len(set(model_names)) != len(model_names):
         raise ConfigurationError("campaign models must not contain duplicates")
     profile_name = _required_string(campaign, "hardware_profile", "campaign")
@@ -73,6 +75,7 @@ def validate_campaign(
     for model_name in model_names:
         model = _named_mapping(model_entries, model_name, "model")
         backend = _required_string(model, "backend", f"model {model_name}")
+        LOGGER.debug("Validating model %s with backend %s", model_name, backend)
         if backend not in SUPPORTED_BACKENDS:
             raise ConfigurationError(
                 f"model {model_name} has unsupported backend {backend!r}; "
@@ -86,6 +89,7 @@ def validate_campaign(
         backends.append(backend)
 
     scoring_methods = _string_list(campaign, "scoring", "campaign")
+    LOGGER.debug("Campaign scoring methods: %s", ",".join(scoring_methods))
     invalid_scoring = set(scoring_methods) - SUPPORTED_SCORING
     if invalid_scoring:
         raise ConfigurationError(f"Unsupported scoring methods: {sorted(invalid_scoring)}")
@@ -100,6 +104,7 @@ def validate_campaign(
         if not isinstance(options, dict):
             raise ConfigurationError(f"benchmark {benchmark_name} options must be a mapping")
         shots = options.get("shots", 0)
+        LOGGER.debug("Validating benchmark %s with %s shots", benchmark_name, shots)
         if not isinstance(shots, int) or isinstance(shots, bool) or shots < 0:
             raise ConfigurationError(f"benchmark {benchmark_name} shots must be a non-negative integer")
         if shots > SHOT_LIMITS[benchmark_name]:
@@ -114,6 +119,7 @@ def validate_campaign(
         raise ConfigurationError("campaign repetitions must be a positive integer")
     try:
         NvidiaProfilingConfig.from_mapping(campaign.get("profiling"))
+        EfimonConfig.from_mapping(campaign.get("efimon"))
     except ValueError as error:
         raise ConfigurationError(str(error)) from error
 
@@ -136,6 +142,7 @@ def validate_campaign(
 
 def get_model(models: dict[str, Any], model_name: str) -> dict[str, Any]:
     """Return a validated model declaration for runtime adapter creation."""
+    LOGGER.debug("Resolving model declaration for %s", model_name)
     return _named_mapping(_required_mapping(models, "models", "models"), model_name, "model")
 
 

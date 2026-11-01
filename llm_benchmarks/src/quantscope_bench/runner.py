@@ -32,6 +32,12 @@ def evaluate_samples(
     model_name: str = "",
 ) -> list[SampleResult]:
     """Evaluate samples once per selected scoring method."""
+    LOGGER.debug(
+        "Starting evaluation run %s for model %s with scoring methods %s",
+        run_id,
+        model_name or "<unnamed>",
+        ",".join(scoring_methods),
+    )
     results: list[SampleResult] = []
     for sample in samples:
         LOGGER.debug("Evaluating %s/%s sample %s", sample.benchmark, sample.task, sample.sample_id)
@@ -40,6 +46,13 @@ def evaluate_samples(
             response = adapter.generate(sample.prompt)
             latency = perf_counter() - started
             prediction = normalize_choice(response)
+            LOGGER.debug(
+                "Sample %s exact_match: response=%r prediction=%s expected=%s",
+                sample.sample_id,
+                response,
+                prediction,
+                sample.expected_choice,
+            )
             results.append(
                 SampleResult(
                     run_id=run_id,
@@ -64,6 +77,13 @@ def evaluate_samples(
             latency = perf_counter() - started
             option_index = best_option(scores)
             prediction = chr(ord("A") + option_index)
+            LOGGER.debug(
+                "Sample %s log_likelihood: scores=%s prediction=%s expected=%s",
+                sample.sample_id,
+                scores,
+                prediction,
+                sample.expected_choice,
+            )
             results.append(
                 SampleResult(
                     run_id=run_id,

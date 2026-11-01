@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import threading
 import time
 from typing import Any
+
+LOGGER = logging.getLogger(__name__)
 
 
 class GPUPerformanceMonitor:
@@ -26,6 +29,7 @@ class GPUPerformanceMonitor:
         self._devices: list[tuple[str, Any]] = []
 
     def start(self) -> None:
+        LOGGER.debug("Starting GPU performance monitor (interval=%.2fs)", self.interval_seconds)
         try:
             import pynvml
 
@@ -50,13 +54,16 @@ class GPUPerformanceMonitor:
                 self._devices.append((uuid, handle))
             if not self._devices:
                 self.detail = "no visible GPUs"
+                LOGGER.debug("GPU monitor found no visible GPUs")
                 return
+            LOGGER.debug("GPU monitor sampling %d device(s)", len(self._devices))
             self.detail = "device-level NVML samples (includes other GPU workloads)"
             self._sample()
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
         except Exception as error:
             self.detail = f"unavailable: {error}"
+            LOGGER.debug("GPU monitor unavailable: %s", error)
 
     def _run(self) -> None:
         while not self._stop.wait(self.interval_seconds):
@@ -79,6 +86,7 @@ class GPUPerformanceMonitor:
             })
 
     def stop(self) -> None:
+        LOGGER.debug("Stopping GPU performance monitor after %d sample(s)", len(self.samples))
         self._stop.set()
         if self._thread is not None:
             self._thread.join()
@@ -90,6 +98,7 @@ class GPUPerformanceMonitor:
                 pass
 
     def summary(self) -> dict[str, Any]:
+        LOGGER.debug("Summarizing %d GPU sample(s) across %d device(s)", len(self.samples), len(self._devices))
         energy = duration = 0.0
         complete_power = bool(self._devices)
         peak_memory = None

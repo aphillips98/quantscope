@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
 from pathlib import Path
 import re
@@ -13,10 +14,19 @@ from typing import Any, Sequence
 
 
 PROFILED_ENV = "QSCOPE_NVIDIA_PROFILING_ACTIVE"
+LOGGER = logging.getLogger(__name__)
 
 
 class NvidiaProfilingError(RuntimeError):
     """Raised when a profiling run cannot be started or collected."""
+
+
+def _unquote(value: str) -> str:
+    """Undo C++ std::quoted formatting used by the launcher for filesystem paths."""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return re.sub(r"\\(.)", r"\1", value[1:-1])
+    return value
 
 
 @dataclass(frozen=True)
@@ -104,6 +114,12 @@ class NvidiaProcessMetricsProfiler:
 
         env = os.environ.copy()
         env[PROFILED_ENV] = "1"
+        LOGGER.debug(
+            "Starting NVIDIA profiling in %s mode (device=%d, window_ms=%d)",
+            self.config.mode,
+            self.config.device,
+            self.config.window_ms,
+        )
         if self.config.mode == "direct":
             return self._run_direct(command, env)
         return self._run_daemon(command, env)
@@ -119,6 +135,7 @@ class NvidiaProcessMetricsProfiler:
         env["NVIDIA_METRICS_OUTPUT_DIR"] = str(capture_dir.resolve())
         env["NVIDIA_METRICS_DEVICE"] = str(self.config.device)
         env["NVIDIA_METRICS_WINDOW_MS"] = str(self.config.window_ms)
+        LOGGER.debug("Running profiled command with LD_PRELOAD=%s: %s", env["LD_PRELOAD"], command)
         return subprocess.run(list(command), env=env, check=False).returncode
 
     def _run_daemon(self, command: Sequence[str], env: dict[str, str]) -> int:
@@ -149,6 +166,7 @@ class NvidiaProcessMetricsProfiler:
             capture_output=True,
             text=True,
         )
+        LOGGER.debug("Daemon launcher %s exited with code %d", launcher, result.returncode)
         sys.stdout.write(result.stdout)
         sys.stderr.write(result.stderr)
         if result.returncode != 0:
@@ -161,12 +179,13 @@ class NvidiaProcessMetricsProfiler:
                 "launcher completed without reporting its session results directory"
             )
 
-        source_dir = Path(results_match.group(1))
-        destination = self.output_dir / "nvidia-profiling" / session_match.group(1)
+        source_dir = Path(_unquote(results_match.group(1)))
+        destination = self.output_dir / "nvidia-profiling" / _unquote(session_match.group(1))
         if not source_dir.is_dir():
             raise NvidiaProfilingError(
                 f"daemon results directory does not exist: {source_dir}"
             )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        LOGGER.debug("Copying daemon results from %s to %s", source_dir, destination)
         shutil.copytree(source_dir, destination, dirs_exist_ok=True)
         return 0

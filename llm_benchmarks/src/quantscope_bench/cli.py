@@ -8,9 +8,11 @@ import os
 from pathlib import Path
 import sys
 from time import perf_counter
-from typing import Sequence
+from typing import Any, Sequence
 
-from quantscope_bench.config import ConfigurationError, get_model, load_yaml, validate_campaign
+from quantscope_bench.config import ConfigurationError, ValidatedCampaign, get_model, load_yaml, validate_campaign
+from quantscope_bench.logging_config import LOG_LEVELS, configure_logging
+from quantscope_bench.telemetry.efimon import EFIMON_ENV, EfimonConfig, EfimonMonitor
 from quantscope_bench.telemetry.nvidia_profiling import (
     PROFILED_ENV,
     NvidiaProcessMetricsProfiler,
@@ -19,7 +21,6 @@ from quantscope_bench.telemetry.nvidia_profiling import (
 )
 
 LOGGER = logging.getLogger(__name__)
-_LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,26 +30,19 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--models", type=Path, required=True)
     validate.add_argument("--campaign", type=Path, required=True)
     validate.add_argument("--hardware", type=Path, required=True)
-    validate.add_argument("--log-level", choices=_LOG_LEVELS, default="CRITICAL")
+    validate.add_argument("--log-level", choices=LOG_LEVELS, default="CRITICAL")
     run = subcommands.add_parser("run", help="run an exact-match DeepEval campaign")
     run.add_argument("--models", type=Path, required=True)
     run.add_argument("--campaign", type=Path, required=True)
     run.add_argument("--hardware", type=Path, required=True)
     run.add_argument("--output-dir", type=Path, required=True)
-    run.add_argument("--log-level", choices=_LOG_LEVELS, default="CRITICAL")
+    run.add_argument("--log-level", choices=LOG_LEVELS, default="CRITICAL")
     return parser
-
-
-def _configure_logging(level_name: str) -> None:
-    logging.basicConfig(
-        level=getattr(logging, level_name),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
-    _configure_logging(arguments.log_level)
+    configure_logging(arguments.log_level)
     LOGGER.debug("Starting %s command", arguments.command)
     try:
         LOGGER.info("Loading benchmark configuration")
@@ -76,12 +70,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(message)
         return 0
 
+    efimon_config = EfimonConfig.from_mapping(campaign_document.get("efimon"))
+    LOGGER.debug(
+        "EfiMon enabled=%s; active environment flag=%s",
+        efimon_config.enabled,
+        os.environ.get(EFIMON_ENV),
+    )
+    if efimon_config.enabled and os.environ.get(EFIMON_ENV) != "1":
+        with EfimonMonitor(efimon_config, arguments.output_dir):
+            return _run_campaign(arguments, argv, models, campaign_document, campaign, message)
+    return _run_campaign(arguments, argv, models, campaign_document, campaign, message)
+
+
+def _run_campaign(
+    arguments: argparse.Namespace,
+    argv: Sequence[str] | None,
+    models: dict[str, Any],
+    campaign_document: dict[str, Any],
+    campaign: ValidatedCampaign,
+    message: str,
+) -> int:
     profiling_config = NvidiaProfilingConfig.from_mapping(
         campaign_document.get("profiling")
+    )
+    LOGGER.debug(
+        "NVIDIA profiling enabled=%s; active environment flag=%s",
+        profiling_config.enabled,
+        os.environ.get(PROFILED_ENV),
     )
     if profiling_config.enabled and os.environ.get(PROFILED_ENV) != "1":
         profiler = NvidiaProcessMetricsProfiler(profiling_config, arguments.output_dir)
         command_arguments = list(argv) if argv is not None else sys.argv[1:]
+        LOGGER.debug("Re-executing CLI under NVIDIA profiler: %s", command_arguments)
         try:
             return profiler.run(
                 [sys.executable, "-m", "quantscope_bench.cli", *command_arguments]
@@ -124,6 +144,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runtime_seconds = perf_counter() - started
                 results.extend(model_results)
                 scores_by_model[model_name] = model_metadata["benchmark_scores"]
+                LOGGER.debug(
+                    "Model %s finished in %.3fs with %d result row(s)",
+                    model_name,
+                    runtime_seconds,
+                    len(model_results),
+                )
             finally:
                 if monitor is not None:
                     monitor.stop()

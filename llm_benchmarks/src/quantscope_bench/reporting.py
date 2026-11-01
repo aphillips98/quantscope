@@ -18,6 +18,7 @@ def performance_summary(
     requests: list[dict[str, Any]], runtime_seconds: float
 ) -> dict[str, Any]:
     """Summarize successful calls, using only measured positive token timings."""
+    LOGGER.debug("Summarizing %d performance requests over %.3fs runtime", len(requests), runtime_seconds)
     latencies = sorted(request["latency_seconds"] for request in requests)
     summary: dict[str, Any] = {
         "requests": len(requests),
@@ -52,6 +53,13 @@ def write_performance_artifacts(
     gpu_samples: list[dict[str, Any]],
 ) -> None:
     """Write separate performance files without altering accuracy artifacts."""
+    LOGGER.debug(
+        "Writing performance artifacts to %s: %d requests, %d summaries, %d GPU samples",
+        output_dir,
+        len(requests),
+        len(summaries),
+        len(gpu_samples),
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_csv(output_dir / "performance_requests.csv", requests, [
         "run_id", "model_name", "request_id", "backend", "latency_seconds",
@@ -98,6 +106,7 @@ def write_run_artifacts(
 
 
 def _summaries(results: list[SampleResult]) -> list[dict[str, Any]]:
+    LOGGER.debug("Aggregating summaries from %d sample results", len(results))
     grouped: dict[tuple[str, str, str, str], list[SampleResult]] = {}
     for result in results:
         grouped.setdefault(
@@ -119,10 +128,12 @@ def _summaries(results: list[SampleResult]) -> list[dict[str, Any]]:
 
 
 def _write_json(path: Path, contents: dict[str, Any]) -> None:
+    LOGGER.debug("Writing JSON artifact %s", path)
     path.write_text(json.dumps(contents, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _write_jsonl(path: Path, results: list[SampleResult]) -> None:
+    LOGGER.debug("Writing %d JSONL records to %s", len(results), path)
     with path.open("w", encoding="utf-8") as output:
         for result in results:
             output.write(json.dumps(asdict(result), sort_keys=True) + "\n")
@@ -133,7 +144,9 @@ def _write_csv(
 ) -> None:
     row_list = [asdict(row) if isinstance(row, SampleResult) else row for row in rows]
     if not row_list and fieldnames is None:
+        LOGGER.debug("Skipping CSV %s: no rows and no explicit fieldnames", path)
         return
+    LOGGER.debug("Writing %d CSV rows to %s", len(row_list), path)
     with path.open("w", newline="", encoding="utf-8") as output:
         writer = csv.DictWriter(output, fieldnames=fieldnames if fieldnames is not None else list(row_list[0]))
         writer.writeheader()

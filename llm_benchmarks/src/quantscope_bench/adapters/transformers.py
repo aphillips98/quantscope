@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Sequence
 
 from quantscope_bench.adapters.base import AdapterCapabilities, ModelAdapter
+
+LOGGER = logging.getLogger(__name__)
 
 class TransformersAdapter(ModelAdapter):
     capabilities = AdapterCapabilities(log_likelihood=True)
@@ -22,13 +25,16 @@ class TransformersAdapter(ModelAdapter):
         inference = model.get("inference", {})
         dtype_name = inference.get("dtype")
         dtype = getattr(torch, dtype_name) if dtype_name else None
+        LOGGER.debug("Loading Transformers model from %s (dtype=%s)", source, dtype_name or "default")
         self._torch = torch
         self._tokenizer = AutoTokenizer.from_pretrained(source)
         self._model = AutoModelForCausalLM.from_pretrained(source, torch_dtype=dtype)
         self._model.eval()
         self._device = next(self._model.parameters()).device
+        LOGGER.debug("Transformers model loaded on device %s", self._device)
 
     def generate(self, prompt: str, max_tokens: int = 1) -> str:
+        LOGGER.debug("Generating completion: prompt_chars=%d max_tokens=%d", len(prompt), max_tokens)
         encoded = self._tokenizer(prompt, return_tensors="pt").to(self._device)
         with self._torch.inference_mode():
             output = self._model.generate(
@@ -38,15 +44,21 @@ class TransformersAdapter(ModelAdapter):
                 pad_token_id=self._tokenizer.eos_token_id,
             )
         generated = output[0, encoded.input_ids.shape[1] :]
-        return self._tokenizer.decode(generated, skip_special_tokens=True)
+        text = self._tokenizer.decode(generated, skip_special_tokens=True)
+        LOGGER.debug("Generated %d token(s): %r", generated.shape[0], text)
+        return text
 
     def score_options(self, prompt: str, options: Sequence[str]) -> list[float]:
-        return [self._score_continuation(prompt, option) for option in options]
+        LOGGER.debug("Scoring %d options for prompt of %d chars", len(options), len(prompt))
+        scores = [self._score_continuation(prompt, option) for option in options]
+        LOGGER.debug("Option scores: %s", scores)
+        return scores
 
     def _score_continuation(self, prompt: str, option: str) -> float:
         prompt_tokens = self._tokenizer(prompt, add_special_tokens=False).input_ids
         option_tokens = self._tokenizer(option, add_special_tokens=False).input_ids
         if not option_tokens:
+            LOGGER.debug("Option %r produced no tokens; scoring as -inf", option)
             return float("-inf")
         input_ids = self._torch.tensor([prompt_tokens + option_tokens], device=self._device)
         with self._torch.inference_mode():

@@ -125,7 +125,7 @@ class LlamaServerAdapterTests(unittest.TestCase):
 
         self.assertEqual(adapter.generate("Question"), "A")
         adapter._model.create_completion.assert_called_once_with(
-            prompt="Question", max_tokens=8, temperature=0.0, stop=["\n"], seed=42
+            prompt="Question", max_tokens=8, temperature=0.0, seed=42
         )
 
     @patch("quantscope_bench.adapters.llamacpp.time.perf_counter", side_effect=[10.0, 10.5])
@@ -142,7 +142,7 @@ class LlamaServerAdapterTests(unittest.TestCase):
         adapter.generate("Question", max_tokens=3)
 
         adapter._model.create_completion.assert_called_once_with(
-            prompt="Question", max_tokens=3, temperature=0.0, stop=["\n"]
+            prompt="Question", max_tokens=3, temperature=0.0
         )
 
     @patch("quantscope_bench.adapters.llamacpp.urlopen")

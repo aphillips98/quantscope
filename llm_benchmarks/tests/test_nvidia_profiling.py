@@ -105,6 +105,37 @@ class NvidiaProcessMetricsProfilerTests(unittest.TestCase):
         self.assertIn("30", command)
         self.assertEqual(command[-3:], ["--", "qscope-bench", "run"])
 
+    @patch("quantscope_bench.telemetry.nvidia_profiling.subprocess.run")
+    @patch("quantscope_bench.telemetry.nvidia_profiling.shutil.which")
+    def test_daemon_mode_accepts_quoted_results_path(self, which_mock, run_mock) -> None:
+        session_dir = self.root / "daemon session"
+        session_dir.mkdir()
+        (session_dir / "gpu_telemetry.csv").write_text("t\n", encoding="utf-8")
+        which_mock.return_value = "/usr/bin/nvidia-process-metrics-launcher"
+        run_mock.return_value = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout=(
+                "Session: session-456\n"
+                "State: completed (stopped)\n"
+                f'Results: "{session_dir}"\n'
+            ),
+            stderr="",
+        )
+        profiler = NvidiaProcessMetricsProfiler(
+            NvidiaProfilingConfig(
+                enabled=True,
+                mode="daemon",
+                library_path=self.library,
+                duration_seconds=30,
+            ),
+            self.root / "artifacts",
+        )
+
+        self.assertEqual(profiler.run(["qscope-bench", "run"]), 0)
+        copied_csv = self.root / "artifacts/nvidia-profiling/session-456/gpu_telemetry.csv"
+        self.assertEqual(copied_csv.read_text(encoding="utf-8"), "t\n")
+
     def test_missing_library_fails_before_launch(self) -> None:
         profiler = NvidiaProcessMetricsProfiler(
             NvidiaProfilingConfig(

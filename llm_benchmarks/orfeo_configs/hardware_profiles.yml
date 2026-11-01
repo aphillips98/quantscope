@@ -13,6 +13,7 @@ profiles:
       partition: DGX
       gres: gpu:A100:1
       cpus_per_task: 16
+      nodelist: dgx002
       memory: 100G
       time: "08:00:00"
     modules: [cuda, A100/llamacpp_cuda/py035, A100/nvidia-profiling/1]
@@ -21,7 +22,18 @@ profiles:
       partition: GPU
       gres: gpu:V100:1
       cpus_per_task: 16
+      nodelist: gpu002
       memory: 100G
       time: "08:00:00"
       account: external
     modules: [cuda, V100/llamacpp_cuda/py035, V100/nvidia-profiling/1]
+  h100:
+    scheduler:
+      partition: H100
+      gres: gpu:H100:1
+      cpus_per_task: 16
+      nodelist: dgx003
+      memory: 100G
+      time: "08:00:00"
+    modules: [cuda, H100/llamacpp_cuda/py035, H100/nvidia-profiling/1]
+    

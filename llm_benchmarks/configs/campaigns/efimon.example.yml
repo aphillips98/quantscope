@@ -1,0 +1,23 @@
+version: 1
+name: efimon-smoke
+model: local-gguf
+hardware_profile: cpu
+repetitions: 1
+seed: 42
+capture_predictions: true
+scoring: [exact_match]
+benchmarks:
+  mmlu:
+    shots: 0
+    tasks: [high_school_computer_science]
+    max_samples: 5
+efimon:
+  enabled: true
+  launcher: efimon-launcher
+  port: 5550
+  sample_interval_seconds: 3
+  discovery_interval_seconds: 0.5
+  startup_timeout_seconds: 10
+  shutdown_timeout_seconds: 15
+profiling:
+  enabled: false

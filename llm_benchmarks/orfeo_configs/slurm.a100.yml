@@ -1,0 +1,5 @@
+models: orfeo_configs/models.yml
+campaign: orfeo_configs/campaigns/a100.yml
+hardware: orfeo_configs/hardware_profiles.yml
+output_dir: ./artifacts/slurm-smoke
+dry_run: true

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import io
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from quantscope_bench import cli
-from quantscope_bench.telemetry.nvidia_profiling import (
+from quantscope_bench.telemetry.performance import (
     NvidiaProcessMetricsProfiler,
     NvidiaProfilingConfig,
     NvidiaProfilingError,
@@ -45,7 +46,7 @@ class NvidiaProcessMetricsProfilerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    @patch("quantscope_bench.telemetry.nvidia_profiling.subprocess.run")
+    @patch("quantscope_bench.telemetry.performance.subprocess.run")
     def test_direct_mode_sets_preload_and_capture_environment(self, run_mock) -> None:
         run_mock.return_value = subprocess.CompletedProcess([], 0)
         profiler = NvidiaProcessMetricsProfiler(
@@ -70,18 +71,25 @@ class NvidiaProcessMetricsProfilerTests(unittest.TestCase):
         self.assertTrue(Path(env["NVIDIA_METRICS_OUTPUT_DIR"]).is_dir())
         self.assertEqual(env[PROFILED_ENV], "1")
 
-    @patch("quantscope_bench.telemetry.nvidia_profiling.subprocess.run")
-    @patch("quantscope_bench.telemetry.nvidia_profiling.shutil.which")
-    def test_daemon_mode_copies_session_results(self, which_mock, run_mock) -> None:
+    @staticmethod
+    def _launcher_process(stdout: str, returncode: int = 0) -> MagicMock:
+        """Build a Popen mock that streams ``stdout`` and then exits."""
+        process = MagicMock()
+        process.stdout = io.StringIO(stdout)
+        process.returncode = returncode
+        process.__enter__.return_value = process
+        process.__exit__.return_value = False
+        return process
+
+    @patch("quantscope_bench.telemetry.performance.subprocess.Popen")
+    @patch("quantscope_bench.telemetry.performance.shutil.which")
+    def test_daemon_mode_copies_session_results(self, which_mock, popen_mock) -> None:
         session_dir = self.root / "daemon-session"
         session_dir.mkdir()
         (session_dir / "kernel_activity.csv").write_text("kernel\n", encoding="utf-8")
         which_mock.return_value = "/usr/bin/nvidia-process-metrics-launcher"
-        run_mock.return_value = subprocess.CompletedProcess(
-            [],
-            0,
-            stdout=f"Session: session-123\nResults: {session_dir}\n",
-            stderr="",
+        popen_mock.return_value = self._launcher_process(
+            f"Session: session-123\nResults: {session_dir}\n"
         )
         profiler = NvidiaProcessMetricsProfiler(
             NvidiaProfilingConfig(
@@ -92,35 +100,34 @@ class NvidiaProcessMetricsProfilerTests(unittest.TestCase):
             ),
             self.root / "artifacts",
         )
+        stale = self.root / "artifacts/performance/nvidia-profiling/old-session"
+        stale.mkdir(parents=True)
+        (stale / "kernel_activity.csv").write_text("stale\n", encoding="utf-8")
 
         status = profiler.run(["qscope-bench", "run"])
 
         self.assertEqual(status, 0)
+        self.assertFalse(stale.exists())
         copied_csv = (
-            self.root / "artifacts/nvidia-profiling/session-123/kernel_activity.csv"
+            self.root / "artifacts/performance/nvidia-profiling/session-123/kernel_activity.csv"
         )
         self.assertEqual(copied_csv.read_text(encoding="utf-8"), "kernel\n")
-        command = run_mock.call_args.args[0]
+        command = popen_mock.call_args.args[0]
         self.assertIn("--duration", command)
         self.assertIn("30", command)
         self.assertEqual(command[-3:], ["--", "qscope-bench", "run"])
 
-    @patch("quantscope_bench.telemetry.nvidia_profiling.subprocess.run")
-    @patch("quantscope_bench.telemetry.nvidia_profiling.shutil.which")
-    def test_daemon_mode_accepts_quoted_results_path(self, which_mock, run_mock) -> None:
+    @patch("quantscope_bench.telemetry.performance.subprocess.Popen")
+    @patch("quantscope_bench.telemetry.performance.shutil.which")
+    def test_daemon_mode_accepts_quoted_results_path(self, which_mock, popen_mock) -> None:
         session_dir = self.root / "daemon session"
         session_dir.mkdir()
         (session_dir / "gpu_telemetry.csv").write_text("t\n", encoding="utf-8")
         which_mock.return_value = "/usr/bin/nvidia-process-metrics-launcher"
-        run_mock.return_value = subprocess.CompletedProcess(
-            [],
-            0,
-            stdout=(
-                "Session: session-456\n"
-                "State: completed (stopped)\n"
-                f'Results: "{session_dir}"\n'
-            ),
-            stderr="",
+        popen_mock.return_value = self._launcher_process(
+            "Session: session-456\n"
+            "State: completed (stopped)\n"
+            f'Results: "{session_dir}"\n'
         )
         profiler = NvidiaProcessMetricsProfiler(
             NvidiaProfilingConfig(
@@ -133,8 +140,41 @@ class NvidiaProcessMetricsProfilerTests(unittest.TestCase):
         )
 
         self.assertEqual(profiler.run(["qscope-bench", "run"]), 0)
-        copied_csv = self.root / "artifacts/nvidia-profiling/session-456/gpu_telemetry.csv"
+        copied_csv = self.root / "artifacts/performance/nvidia-profiling/session-456/gpu_telemetry.csv"
         self.assertEqual(copied_csv.read_text(encoding="utf-8"), "t\n")
+
+    @patch("quantscope_bench.telemetry.performance.subprocess.Popen")
+    @patch("quantscope_bench.telemetry.performance.shutil.which")
+    def test_daemon_mode_prunes_parent_captures(self, which_mock, popen_mock) -> None:
+        session_dir = self.root / "daemon-session"
+        server_dir = session_dir / "llama-server-40619"
+        server_dir.mkdir(parents=True)
+        (session_dir / "kernel_activity.csv").write_text("empty\n", encoding="utf-8")
+        (session_dir / "gpu_telemetry.csv").write_text("cli\n", encoding="utf-8")
+        (session_dir / "pm_sampling.csv").write_text("pm\n", encoding="utf-8")
+        (server_dir / "kernel_activity.csv").write_text("kernels\n", encoding="utf-8")
+        (server_dir / "gpu_telemetry.csv").write_text("server\n", encoding="utf-8")
+        which_mock.return_value = "/usr/bin/nvidia-process-metrics-launcher"
+        popen_mock.return_value = self._launcher_process(
+            f"Session: session-789\nResults: {session_dir}\n"
+        )
+        profiler = NvidiaProcessMetricsProfiler(
+            NvidiaProfilingConfig(
+                enabled=True,
+                mode="daemon",
+                library_path=self.library,
+                duration_seconds=30,
+            ),
+            self.root / "artifacts",
+        )
+
+        self.assertEqual(profiler.run(["qscope-bench", "run"]), 0)
+        copied = self.root / "artifacts/performance/nvidia-profiling/session-789"
+        self.assertFalse((copied / "kernel_activity.csv").exists())
+        self.assertFalse((copied / "gpu_telemetry.csv").exists())
+        self.assertTrue((copied / "pm_sampling.csv").exists())
+        self.assertTrue((copied / "llama-server-40619/kernel_activity.csv").exists())
+        self.assertTrue((copied / "llama-server-40619/gpu_telemetry.csv").exists())
 
     def test_missing_library_fails_before_launch(self) -> None:
         profiler = NvidiaProcessMetricsProfiler(

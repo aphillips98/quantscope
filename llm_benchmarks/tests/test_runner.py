@@ -91,13 +91,14 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(status, 0)
                 adapter.close.assert_called_once_with()
                 output_dir = Path(directory)
-                with (output_dir / "summary.csv").open(newline="") as source:
+                with (output_dir / "predictions" / "summary.csv").open(newline="") as source:
                     self.assertEqual(list(csv.DictReader(source))[0]["accuracy"], "1.0")
-                self.assertEqual((output_dir / "performance_summary.csv").exists(), capture)
+                performance_dir = output_dir / "performance"
+                self.assertEqual((performance_dir / "performance_summary.csv").exists(), capture)
                 if capture:
                     monitor_type.return_value.start.assert_called_once_with()
                     monitor_type.return_value.stop.assert_called_once_with()
-                    with (output_dir / "performance_requests.csv").open(newline="") as source:
+                    with (performance_dir / "performance_requests.csv").open(newline="") as source:
                         self.assertEqual(list(csv.DictReader(source))[0]["model_name"], "model")
                 else:
                     monitor_type.assert_not_called()

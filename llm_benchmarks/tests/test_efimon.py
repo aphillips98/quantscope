@@ -18,7 +18,7 @@ from quantscope_bench.config import ConfigurationError, validate_campaign
 from quantscope_bench.telemetry.efimon import (
     EFIMON_ENV, EfimonConfig, EfimonMonitor, descendants, process_tree, summarize_capture,
 )
-from quantscope_bench.telemetry.nvidia_profiling import PROFILED_ENV
+from quantscope_bench.telemetry.performance import PROFILED_ENV
 
 
 class EfimonConfigTests(unittest.TestCase):
@@ -113,7 +113,10 @@ class EfimonMonitorTests(unittest.TestCase):
         self.directory.cleanup()
 
     def test_captures_parent_and_new_child_and_integrates_metadata(self) -> None:
-        (self.root / "metadata.json").write_text('{"benchmark_scores": {}}', encoding="utf-8")
+        (self.root / "predictions").mkdir()
+        (self.root / "predictions" / "metadata.json").write_text(
+            '{"benchmark_scores": {}}', encoding="utf-8"
+        )
         previous = os.environ.get(EFIMON_ENV)
         with EfimonMonitor(self.config, self.root) as monitor:
             self.assertEqual(os.environ[EFIMON_ENV], "1")
@@ -134,7 +137,10 @@ class EfimonMonitorTests(unittest.TestCase):
         self.assertEqual(summary["status"], "completed")
         self.assertEqual({capture["pid"] for capture in summary["captures"]}, {os.getpid(), child.pid})
         self.assertTrue(all(capture.process.poll() is not None for capture in monitor._captures))
-        self.assertEqual(json.loads((self.root / "metadata.json").read_text())["efimon"], summary)
+        self.assertEqual(
+            json.loads((self.root / "predictions" / "metadata.json").read_text())["efimon"],
+            summary,
+        )
 
     def test_missing_launcher_warns_and_does_not_block_workload(self) -> None:
         warnings = io.StringIO()
@@ -204,7 +210,8 @@ class EfimonMonitorTests(unittest.TestCase):
             self.assertTrue(captures[0].stopped)
 
     def test_invalid_metadata_does_not_hide_capture_failure_or_replace_metadata(self) -> None:
-        metadata = self.root / "metadata.json"
+        (self.root / "predictions").mkdir()
+        metadata = self.root / "predictions" / "metadata.json"
         metadata.write_text("invalid JSON", encoding="utf-8")
         with redirect_stderr(io.StringIO()), EfimonMonitor(self.config, self.root) as monitor:
             pass
@@ -245,7 +252,7 @@ class EfimonMonitorTests(unittest.TestCase):
         profiler.assert_called_once()
         adapter.assert_called_once()
         benchmark.assert_called_once()
-        metadata = json.loads((self.root / "metadata.json").read_text())
+        metadata = json.loads((self.root / "predictions" / "metadata.json").read_text())
         self.assertEqual(metadata["benchmark_scores"], {"mmlu": 1.0})
         self.assertEqual(metadata["efimon"]["status"], "completed")
         self.assertEqual(len(list((self.root / "efimon").glob("capture-*"))), 1)

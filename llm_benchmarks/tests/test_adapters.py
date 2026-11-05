@@ -66,8 +66,32 @@ class LlamaServerAdapterTests(unittest.TestCase):
         self.assertEqual(payload["n_predict"], 8)
         self.assertEqual(payload["seed"], 42)
         process.terminate.assert_called_once_with()
+        self.assertIsNone(popen.call_args.kwargs["env"])
         self.assertEqual(len(adapter.performance_requests), 1)
         self.assertIsNone(adapter.performance_requests[0]["prompt_tokens"])
+
+    @patch("quantscope_bench.adapters.llamacpp.urlopen")
+    @patch("quantscope_bench.adapters.llamacpp.subprocess.Popen")
+    @patch("quantscope_bench.adapters.llamacpp.socket.socket")
+    @patch("quantscope_bench.adapters.llamacpp.shutil.which", return_value="/opt/llama/bin/llama-server")
+    def test_server_gets_private_nvidia_metrics_directory(
+        self, _which: MagicMock, socket_factory: MagicMock, popen: MagicMock, urlopen: MagicMock
+    ) -> None:
+        listener = socket_factory.return_value.__enter__.return_value
+        listener.getsockname.return_value = ("127.0.0.1", 54321)
+        popen.return_value.poll.return_value = None
+        health_response = MagicMock()
+        health_response.__enter__.return_value.status = 200
+        urlopen.side_effect = [health_response]
+
+        with patch.dict("os.environ", {"NVIDIA_METRICS_OUTPUT_DIR": "/tmp/capture"}):
+            adapter = LlamaCppAdapter({"local_path": "model.gguf", "inference": {}})
+        adapter.close()
+
+        env = popen.call_args.kwargs["env"]
+        self.assertEqual(
+            env["NVIDIA_METRICS_OUTPUT_DIR"], "/tmp/capture/llama-server-54321"
+        )
 
     @patch("quantscope_bench.adapters.llamacpp.time.perf_counter", side_effect=[10.0, 10.25])
     @patch("quantscope_bench.adapters.llamacpp.urlopen")

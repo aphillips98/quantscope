@@ -13,7 +13,7 @@ from typing import Any, Sequence
 from quantscope_bench.config import ConfigurationError, ValidatedCampaign, get_model, load_yaml, validate_campaign
 from quantscope_bench.logging_config import LOG_LEVELS, configure_logging
 from quantscope_bench.telemetry.efimon import EFIMON_ENV, EfimonConfig, EfimonMonitor
-from quantscope_bench.telemetry.nvidia_profiling import (
+from quantscope_bench.telemetry.performance import (
     PROFILED_ENV,
     NvidiaProcessMetricsProfiler,
     NvidiaProfilingConfig,
@@ -126,14 +126,23 @@ def _run_campaign(
         performance_requests = []
         performance_summaries = []
         gpu_samples = []
+        telemetry_options = campaign_document.get("telemetry") or {}
+        telemetry_enabled = telemetry_options.get("enabled", True)
+        LOGGER.debug("GPU performance monitor enabled=%s", telemetry_enabled)
+        llamacpp_verbose = bool(
+            (campaign_document.get("llamacpp") or {}).get("verbose", False)
+        )
+        LOGGER.debug("llama.cpp verbose logging enabled=%s", llamacpp_verbose)
         for model_name in campaign.model_names:
             LOGGER.info("Creating adapter for model %s", model_name)
-            adapter = create_adapter(get_model(models, model_name))
+            adapter = create_adapter(
+                get_model(models, model_name), llamacpp_verbose=llamacpp_verbose
+            )
             monitor = None
             try:
-                if isinstance(adapter, LlamaCppAdapter):
+                if telemetry_enabled and isinstance(adapter, LlamaCppAdapter):
                     monitor = GPUPerformanceMonitor(
-                        campaign_document.get("telemetry", {}).get("sample_interval_seconds", 1.0)
+                        telemetry_options.get("sample_interval_seconds", 1.0)
                     )
                     monitor.start()
                 LOGGER.info("Running benchmark campaign for model %s", model_name)
@@ -174,7 +183,7 @@ def _run_campaign(
         benchmark_metadata = {"benchmark_scores": benchmark_scores}
         LOGGER.info("Writing benchmark artifacts to %s", arguments.output_dir)
         write_run_artifacts(
-            arguments.output_dir,
+            arguments.output_dir / "predictions",
             {
                 "campaign": campaign_document,
                 "models": list(campaign.model_names),
@@ -186,7 +195,10 @@ def _run_campaign(
         )
         if performance_summaries:
             write_performance_artifacts(
-                arguments.output_dir, performance_requests, performance_summaries, gpu_samples
+                arguments.output_dir / "performance",
+                performance_requests,
+                performance_summaries,
+                gpu_samples,
             )
     except (RuntimeError, ConfigurationError) as error:
         LOGGER.error("Benchmark run failed: %s", error)

@@ -10,14 +10,14 @@ from quantscope_bench.config import ConfigurationError
 
 LOGGER = logging.getLogger(__name__)
 
-def create_adapter(model: dict[str, Any]) -> ModelAdapter:
+def create_adapter(model: dict[str, Any], *, llamacpp_verbose: bool = False) -> ModelAdapter:
     backend = model["backend"]
     LOGGER.debug("Selecting adapter for backend %s", backend)
     if backend == "llamacpp":
         from quantscope_bench.adapters.llamacpp import LlamaCppAdapter
 
-        LOGGER.debug("Creating LlamaCppAdapter")
-        return LlamaCppAdapter(model)
+        LOGGER.debug("Creating LlamaCppAdapter (verbose=%s)", llamacpp_verbose)
+        return LlamaCppAdapter(model, verbose=llamacpp_verbose)
     if backend == "transformers":
         from quantscope_bench.adapters.transformers import TransformersAdapter
 

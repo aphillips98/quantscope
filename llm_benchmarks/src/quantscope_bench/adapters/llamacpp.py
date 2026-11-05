@@ -21,8 +21,9 @@ LOGGER = logging.getLogger(__name__)
 class LlamaCppAdapter(ModelAdapter):
     capabilities = AdapterCapabilities(log_likelihood=False)
 
-    def __init__(self, model: dict[str, Any]) -> None:
+    def __init__(self, model: dict[str, Any], verbose: bool = False) -> None:
         inference = model.get("inference", {})
+        self._verbose = bool(verbose)
         flash_attention = inference.get("flash_attention", "off")
         if isinstance(flash_attention, bool):
             flash_attention = "on" if flash_attention else "off"
@@ -60,7 +61,7 @@ class LlamaCppAdapter(ModelAdapter):
             n_ctx=inference.get("context_size", 4096),
             n_gpu_layers=inference.get("gpu_layers", 0),
             flash_attn=self._flash_attention == "on",
-            verbose=False,
+            verbose=self._verbose,
         )
         self._temperature = inference.get("temperature", 0.0)
 
@@ -178,7 +179,28 @@ class LlamaCppAdapter(ModelAdapter):
             "--flash-attn",
             self._flash_attention,
         ]
-        self._server_process = subprocess.Popen(command, stdout=subprocess.DEVNULL)
+        # The NVIDIA Process Metrics collector writes fixed file names per
+        # process at exit. Give llama-server (the process that actually runs
+        # CUDA kernels) its own capture directory so the parent CLI, which
+        # exits last with an empty kernel capture, cannot overwrite it.
+        env = None
+        metrics_dir = os.environ.get("NVIDIA_METRICS_OUTPUT_DIR")
+        if metrics_dir:
+            env = os.environ.copy()
+            env["NVIDIA_METRICS_OUTPUT_DIR"] = os.path.join(
+                metrics_dir, f"llama-server-{port}"
+            )
+            LOGGER.debug(
+                "Redirecting llama-server NVIDIA metrics capture to %s",
+                env["NVIDIA_METRICS_OUTPUT_DIR"],
+            )
+        # llama-server logs every slot/timing event to stderr; silence both
+        # streams unless campaign llamacpp.verbose is true (the Python fallback
+        # honours the same flag through Llama(verbose=...)).
+        streams = None if self._verbose else subprocess.DEVNULL
+        self._server_process = subprocess.Popen(
+            command, stdout=streams, stderr=streams, env=env
+        )
         LOGGER.debug("Started llama-server pid %d at %s", self._server_process.pid, base_url)
         deadline = time.monotonic() + inference.get("startup_timeout", 300)
         while time.monotonic() < deadline:

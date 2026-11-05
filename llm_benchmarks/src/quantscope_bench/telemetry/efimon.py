@@ -345,7 +345,7 @@ class EfimonMonitor:
             "captures": captures,
         }
         self.capture_dir.mkdir(parents=True, exist_ok=True)
-        metadata_path = self.output_dir / "metadata.json"
+        metadata_path = self.output_dir / "predictions" / "metadata.json"
         if metadata_path.exists():
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))

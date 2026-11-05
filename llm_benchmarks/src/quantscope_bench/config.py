@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 from quantscope_bench.telemetry.efimon import EfimonConfig
-from quantscope_bench.telemetry.nvidia_profiling import NvidiaProfilingConfig
+from quantscope_bench.telemetry.performance import NvidiaProfilingConfig
 
 SUPPORTED_BACKENDS = frozenset({"llamacpp", "transformers", "vllm"})
 SUPPORTED_BENCHMARKS = frozenset({"mmlu", "hellaswag"})

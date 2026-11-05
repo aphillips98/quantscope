@@ -64,6 +64,7 @@ def write_performance_artifacts(
     _write_csv(output_dir / "performance_requests.csv", requests, [
         "run_id", "model_name", "request_id", "backend", "latency_seconds",
         "prompt_tokens", "generated_tokens", "prompt_seconds", "generation_seconds",
+        "start_timestamp_ns", "end_timestamp_ns", "finish_reason",
     ] if not requests else None)
     _write_csv(output_dir / "performance_summary.csv", summaries)
     _write_csv(output_dir / "gpu_samples.csv", gpu_samples, [
@@ -151,3 +152,13 @@ def _write_csv(
         writer = csv.DictWriter(output, fieldnames=fieldnames if fieldnames is not None else list(row_list[0]))
         writer.writeheader()
         writer.writerows(row_list)
+
+def write_instrumentation_artifacts(
+    output_dir: Path, traces: list[dict[str, Any]], windows: list[dict[str, Any]]
+) -> None:
+    """Write additive instrumentation without modifying benchmark scoring artifacts."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with (output_dir / "generation_traces.jsonl").open("w", encoding="utf-8") as stream:
+        for record in traces:
+            stream.write(json.dumps(record, sort_keys=True) + "\n")
+    _write_json(output_dir / "benchmark_windows.json", {"windows": windows})

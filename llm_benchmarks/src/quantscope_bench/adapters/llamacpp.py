@@ -30,6 +30,9 @@ class LlamaCppAdapter(ModelAdapter):
         if flash_attention not in ("on", "off", "auto"):
             raise ValueError("inference.flash_attention must be on, off, auto, or a boolean")
         self._flash_attention = flash_attention
+        self._mode = str(inference.get("mode", "completion")).lower()
+        if self._mode not in ("completion", "chat", "grammar"):
+            raise ValueError("inference.mode must be completion, chat, or grammar")
         self._max_tokens = inference.get("max_tokens", 8)
         self._seed = inference.get("seed")
         self._server_process: subprocess.Popen[bytes] | None = None
@@ -66,6 +69,7 @@ class LlamaCppAdapter(ModelAdapter):
         self._temperature = inference.get("temperature", 0.0)
 
     def generate(self, prompt: str, max_tokens: int = 1) -> str:
+        started_ns = time.time_ns()
         started = time.perf_counter()
         generation_tokens = self._max_tokens if max_tokens == 1 else max_tokens
         LOGGER.debug(
@@ -75,40 +79,76 @@ class LlamaCppAdapter(ModelAdapter):
             "llama-server" if self._server_process is not None else "llama-cpp-python",
         )
         if self._server_process is not None:
-            completion: dict[str, Any] = {
-                "prompt": prompt,
-                "n_predict": generation_tokens,
-                "temperature": self._temperature,
-            }
+            if self._mode == "chat":
+                endpoint = "/v1/chat/completions"
+                completion: dict[str, Any] = {
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": generation_tokens,
+                    "temperature": self._temperature,
+                }
+            else:
+                endpoint = "/completion"
+                completion = {
+                    "prompt": prompt,
+                    "n_predict": generation_tokens,
+                    "temperature": self._temperature,
+                }
+                if self._mode == "grammar":
+                    completion["grammar"] = 'root ::= "A" | "B" | "C" | "D"'
             if self._seed is not None:
                 completion["seed"] = self._seed
-            payload = json.dumps(completion).encode("utf-8")
             request = Request(
-                f"{self._base_url}/completion",
-                data=payload,
+                f"{self._base_url}{endpoint}",
+                data=json.dumps(completion).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
             with urlopen(request, timeout=300) as response:
                 result = json.loads(response.read())
-            text = str(result["content"])
-            self._record_performance(started, result, "llama-server")
+            if self._mode == "chat":
+                content = result["choices"][0]["message"]["content"]
+                text = "" if content is None else str(content)
+            else:
+                text = str(result["content"])
+            self._record_performance(started, result, "llama-server", started_ns)
             return text
 
-        response = self._model.create_completion(
-            prompt=prompt,
-            max_tokens=generation_tokens,
-            temperature=self._temperature,
-            **({"seed": self._seed} if self._seed is not None else {}),
-        )
-        text = str(response["choices"][0]["text"])
-        self._record_performance(started, response, "llama-cpp-python")
+        common: dict[str, Any] = {
+            "max_tokens": generation_tokens,
+            "temperature": self._temperature,
+        }
+        if self._seed is not None:
+            common["seed"] = self._seed
+        if self._mode == "chat":
+            response = self._model.create_chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                **common,
+            )
+            content = response["choices"][0]["message"]["content"]
+            text = "" if content is None else str(content)
+        else:
+            if self._mode == "grammar":
+                from llama_cpp import LlamaGrammar
+                common["grammar"] = LlamaGrammar.from_string(
+                    'root ::= "A" | "B" | "C" | "D"'
+                )
+            response = self._model.create_completion(prompt=prompt, **common)
+            text = str(response["choices"][0]["text"])
+        self._record_performance(started, response, "llama-cpp-python", started_ns)
         return text
 
     def _record_performance(
-        self, started: float, response: dict[str, Any], backend: str
+        self, started: float, response: dict[str, Any], backend: str, started_ns: int
     ) -> None:
+        ended_ns = time.time_ns()
         latency = time.perf_counter() - started
+        if backend == "llama-server" and self._mode != "chat":
+            finish_reason = response.get("stop_type")
+            if finish_reason is None and response.get("stopped_limit") is True:
+                finish_reason = "limit"
+        else:
+            choices = response.get("choices") or []
+            finish_reason = choices[0].get("finish_reason") if choices else None
         timings = response.get("timings") or {}
         usage = response.get("usage") or {}
         if not isinstance(timings, dict):
@@ -116,8 +156,8 @@ class LlamaCppAdapter(ModelAdapter):
         if not isinstance(usage, dict):
             usage = {}
         values = {
-            "prompt_tokens": timings.get("prompt_n", usage.get("prompt_tokens")),
-            "generated_tokens": timings.get("predicted_n", usage.get("completion_tokens")),
+            "prompt_tokens": usage.get("prompt_tokens", timings.get("prompt_n")),
+            "generated_tokens": usage.get("completion_tokens", timings.get("predicted_n")),
             "prompt_seconds": timings.get("prompt_ms"),
             "generation_seconds": timings.get("predicted_ms"),
         }
@@ -130,7 +170,8 @@ class LlamaCppAdapter(ModelAdapter):
                 values[key] /= 1000
         self.performance_requests.append(
             {"request_id": len(self.performance_requests), "backend": backend,
-             "latency_seconds": latency, **values}
+             "latency_seconds": latency, "start_timestamp_ns": started_ns,
+             "end_timestamp_ns": ended_ns, "finish_reason": finish_reason, **values}
         )
         LOGGER.debug(
             "Recorded %s request %d: latency=%.3fs prompt_tokens=%s generated_tokens=%s",

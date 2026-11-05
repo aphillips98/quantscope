@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from threading import Lock
 from typing import Any
 
 from quantscope_bench.adapters.base import ModelAdapter
@@ -25,9 +27,12 @@ def run_deepeval_campaign(
             f"DeepEval import failed ({error}); run `pip install -e '.[deepeval]'`"
         ) from error
 
-    bridge = _make_deepeval_model(DeepEvalBaseLLM, adapter)
+    generation_traces: list[dict[str, Any]] = []
+    trace_lock = Lock()
+    active_benchmark = {"name": ""}
+    bridge = _make_deepeval_model(DeepEvalBaseLLM, adapter, generation_traces, trace_lock, active_benchmark)
     all_results: list[SampleResult] = []
-    metadata: dict[str, Any] = {"benchmark_scores": {}}
+    metadata: dict[str, Any] = {"benchmark_scores": {}, "benchmark_windows": [], "generation_traces": generation_traces}
     for name, options in campaign["benchmarks"].items():
         LOGGER.info("Starting %s benchmark", name)
         task_type = MMLUTask if name == "mmlu" else HellaSwagTask
@@ -41,7 +46,17 @@ def run_deepeval_campaign(
             options.get("batch_size", 1),
         )
         benchmark = benchmark_type(tasks=tasks or None, n_shots=options.get("shots", 0))
-        benchmark.evaluate(model=bridge, batch_size=options.get("batch_size", 1))
+        active_benchmark["name"] = name
+        started_ns = time.time_ns()
+        started = time.perf_counter()
+        try:
+            benchmark.evaluate(model=bridge, batch_size=options.get("batch_size", 1))
+        finally:
+            metadata["benchmark_windows"].append({
+                "benchmark": name, "model_name": model_name,
+                "start_timestamp_ns": started_ns, "end_timestamp_ns": time.time_ns(),
+                "duration_seconds": time.perf_counter() - started,
+            })
         metadata["benchmark_scores"][name] = float(benchmark.overall_score)
         benchmark_results = _normalize_predictions(
             benchmark.predictions, name, run_id, model_name
@@ -57,14 +72,29 @@ def run_deepeval_campaign(
     return all_results, metadata
 
 
-def _make_deepeval_model(base_class: type, adapter: ModelAdapter) -> Any:
+def _make_deepeval_model(
+    base_class: type, adapter: ModelAdapter, traces: list[dict[str, Any]],
+    lock: Lock, active_benchmark: dict[str, str],
+) -> Any:
     class AdapterDeepEvalModel(base_class):
         def load_model(self) -> ModelAdapter:
             return adapter
 
         def generate(self, prompt: str) -> str:
+            start_ns = time.time_ns()
+            started = time.perf_counter()
             raw = adapter.generate(prompt)
-            return normalize_choice(raw) or raw.strip()
+            end_ns = time.time_ns()
+            submitted = normalize_choice(raw) or raw.strip()  # Original scoring behavior.
+            with lock:
+                traces.append({
+                    "trace_id": len(traces), "benchmark": active_benchmark["name"],
+                    "prompt": prompt, "raw_response": raw,
+                    "submitted_response": submitted,
+                    "start_timestamp_ns": start_ns, "end_timestamp_ns": end_ns,
+                    "latency_seconds": time.perf_counter() - started,
+                })
+            return submitted
 
         def batch_generate(self, prompts: list[str]) -> list[str]:
             return [self.generate(prompt) for prompt in prompts]

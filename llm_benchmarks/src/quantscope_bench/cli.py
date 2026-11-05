@@ -117,7 +117,10 @@ def _run_campaign(
         from quantscope_bench.adapters import create_adapter
         from quantscope_bench.adapters.llamacpp import LlamaCppAdapter
         from quantscope_bench.benchmarks.deepeval import run_deepeval_campaign
-        from quantscope_bench.reporting import performance_summary, write_performance_artifacts, write_run_artifacts
+        from quantscope_bench.reporting import (
+            performance_summary, write_performance_artifacts, write_run_artifacts,
+            write_instrumentation_artifacts,
+        )
         from quantscope_bench.telemetry import collect_platform_inventory
         from quantscope_bench.telemetry.performance import GPUPerformanceMonitor
 
@@ -126,6 +129,8 @@ def _run_campaign(
         performance_requests = []
         performance_summaries = []
         gpu_samples = []
+        generation_traces = []
+        benchmark_windows = []
         telemetry_options = campaign_document.get("telemetry") or {}
         telemetry_enabled = telemetry_options.get("enabled", True)
         LOGGER.debug("GPU performance monitor enabled=%s", telemetry_enabled)
@@ -153,6 +158,14 @@ def _run_campaign(
                 runtime_seconds = perf_counter() - started
                 results.extend(model_results)
                 scores_by_model[model_name] = model_metadata["benchmark_scores"]
+                generation_traces.extend(
+                    {"run_id": "run-1", "model_name": model_name, **trace}
+                    for trace in model_metadata["generation_traces"]
+                )
+                benchmark_windows.extend(
+                    {"run_id": "run-1", **window}
+                    for window in model_metadata["benchmark_windows"]
+                )
                 LOGGER.debug(
                     "Model %s finished in %.3fs with %d result row(s)",
                     model_name,
@@ -192,6 +205,9 @@ def _run_campaign(
             },
             results,
             bool(campaign_document.get("capture_predictions", False)),
+        )
+        write_instrumentation_artifacts(
+            arguments.output_dir / "instrumentation", generation_traces, benchmark_windows
         )
         if performance_summaries:
             write_performance_artifacts(

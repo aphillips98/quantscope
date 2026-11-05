@@ -1,10 +1,7 @@
 version: 1
 name: a100
 models:
-  - llama3.1-8b-q4_k_m
-  - phi-3.5-mini-3.8b-q4_k_m
-  - gemma-2-9b-it-q4_k_m
-  - mistral-7b-instruct-v0.3-q4_k_m
+  - mistral-7b-instruct-v0.3-q8_0
 hardware_profile: a100
 repetitions: 1
 seed: 42
@@ -14,25 +11,22 @@ benchmarks:
   mmlu:
     shots: 5
     tasks: [high_school_computer_science]
-    max_samples: 5
+    max_sample: 5
   hellaswag:
     shots: 5
     tasks: [applying_sunscreen]
-    max_samples: 5
+    max_sample: 5
 telemetry:
-  require_energy: true
+  enabled: true
+  require_energy: false
   sample_interval_seconds: 1.0
+llamacpp:
+  verbose: false
 profiling:
-  enabled: false
-  mode: direct
-  library_path: ${HOME}/.local/programs/A100/nvidia-profiling/lib/nvidia-process-metrics/libnvidia-process-metrics.so
-  device: 0
-  window_ms: 200
-profiling:
-  enabled: false
+  enabled: true
   mode: daemon
   library_path: ${HOME}/.local/programs/A100/nvidia-profiling/lib/nvidia-process-metrics/libnvidia-process-metrics.so
   launcher: nvidia-process-metrics-launcher
   device: 0
-  window_ms: 200
-  duration_seconds: 600
+  window_ms: 10
+  duration_seconds: 120

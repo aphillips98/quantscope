@@ -148,7 +148,9 @@ models:
     backend: llamacpp
     local_path: /orfeo/cephfs/home/dssc/aphillips/dev/power_analysis/models/llm-models/mistral-7b/Mistral-7B-Instruct-v0.3-Q8_0.gguf
     inference:
-      context_size: 4096
+      mode: chat
       temperature: 0.0
-      max_tokens: 8
       seed: 42
+      max_tokens: 8
+      gpu_layers: -1
+      context_size: 4096

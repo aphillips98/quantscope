@@ -119,9 +119,12 @@ def _run_campaign(
         from quantscope_bench.benchmarks.deepeval import run_deepeval_campaign
         from quantscope_bench.reporting import (
             performance_summary, write_performance_artifacts, write_run_artifacts,
-            write_instrumentation_artifacts,
+            write_instrumentation_artifacts, write_data_quality_artifacts,
         )
         from quantscope_bench.telemetry import collect_platform_inventory
+        from quantscope_bench.telemetry.benchmark_energy import integrate_benchmark_energy
+        from quantscope_bench.validation import validate_run
+        from quantscope_bench.provenance import collect_provenance
         from quantscope_bench.telemetry.performance import GPUPerformanceMonitor
 
         results = []
@@ -138,61 +141,90 @@ def _run_campaign(
             (campaign_document.get("llamacpp") or {}).get("verbose", False)
         )
         LOGGER.debug("llama.cpp verbose logging enabled=%s", llamacpp_verbose)
-        for model_name in campaign.model_names:
-            LOGGER.info("Creating adapter for model %s", model_name)
-            adapter = create_adapter(
-                get_model(models, model_name), llamacpp_verbose=llamacpp_verbose
-            )
-            monitor = None
-            try:
-                if telemetry_enabled and isinstance(adapter, LlamaCppAdapter):
-                    monitor = GPUPerformanceMonitor(
-                        telemetry_options.get("sample_interval_seconds", 1.0)
+        repetitions = campaign_document.get("repetitions", 1)
+        # Each repetition gets a fresh adapter and monitor. This prevents request
+        # IDs and GPU power samples from leaking across independent runs.
+        for repetition in range(1, repetitions + 1):
+            run_id = f"run-{repetition}"
+            for model_name in campaign.model_names:
+                LOGGER.info("Starting %s for model %s", run_id, model_name)
+                adapter = create_adapter(
+                    get_model(models, model_name), llamacpp_verbose=llamacpp_verbose
+                )
+                monitor = None
+                runtime_seconds = 0.0
+                try:
+                    if telemetry_enabled and isinstance(adapter, LlamaCppAdapter):
+                        monitor = GPUPerformanceMonitor(
+                            telemetry_options.get("sample_interval_seconds", 1.0)
+                        )
+                        monitor.start()
+                    started = perf_counter()
+                    model_results, model_metadata = run_deepeval_campaign(
+                        adapter, campaign_document, run_id, model_name
                     )
-                    monitor.start()
-                LOGGER.info("Running benchmark campaign for model %s", model_name)
-                started = perf_counter()
-                model_results, model_metadata = run_deepeval_campaign(
-                    adapter, campaign_document, "run-1", model_name
-                )
-                runtime_seconds = perf_counter() - started
-                results.extend(model_results)
-                scores_by_model[model_name] = model_metadata["benchmark_scores"]
-                generation_traces.extend(
-                    {"run_id": "run-1", "model_name": model_name, **trace}
-                    for trace in model_metadata["generation_traces"]
-                )
-                benchmark_windows.extend(
-                    {"run_id": "run-1", **window}
-                    for window in model_metadata["benchmark_windows"]
-                )
-                LOGGER.debug(
-                    "Model %s finished in %.3fs with %d result row(s)",
-                    model_name,
-                    runtime_seconds,
-                    len(model_results),
-                )
-            finally:
+                    runtime_seconds = perf_counter() - started
+                    results.extend(model_results)
+                    scores_by_model.setdefault(model_name, {})[run_id] = model_metadata["benchmark_scores"]
+                    generation_traces.extend(
+                        {**trace, "run_id": run_id, "model_name": model_name}
+                        for trace in model_metadata["generation_traces"]
+                    )
+                    benchmark_windows.extend(
+                        {**window, "run_id": run_id, "model_name": model_name}
+                        for window in model_metadata["benchmark_windows"]
+                    )
+                    LOGGER.info("Finished %s/%s in %.3fs (%d results)",
+                                model_name, run_id, runtime_seconds, len(model_results))
+                finally:
+                    if monitor is not None:
+                        monitor.stop()
+                    adapter.close()
                 if monitor is not None:
-                    monitor.stop()
-                adapter.close()
-                LOGGER.debug("Closed model adapter %s", model_name)
-            if monitor is not None:
-                identity = {"run_id": "run-1", "model_name": model_name}
-                performance_requests.extend(
-                    {**identity, **request} for request in adapter.performance_requests
+                    identity = {"run_id": run_id, "model_name": model_name}
+                    performance_requests.extend(
+                        {**request, **identity} for request in adapter.performance_requests
+                    )
+                    performance_summaries.append({
+                        **identity,
+                        **performance_summary(adapter.performance_requests, runtime_seconds),
+                        **monitor.summary(),
+                    })
+                    gpu_samples.extend(
+                        {**sample, **identity} for sample in monitor.samples
+                    )
+        # Never mix power samples from different repetitions when integrating.
+        benchmark_gpu_energy = []
+        for run_index in range(1, repetitions + 1):
+            run_id = f"run-{run_index}"
+            for model_name in campaign.model_names:
+                model_windows = [w for w in benchmark_windows
+                                 if w["model_name"] == model_name and w["run_id"] == run_id]
+                model_samples = [s for s in gpu_samples
+                                 if s["model_name"] == model_name and s["run_id"] == run_id]
+                benchmark_gpu_energy.extend(
+                    integrate_benchmark_energy(model_samples, model_windows)
                 )
-                performance_summaries.append({
-                    **identity,
-                    **performance_summary(adapter.performance_requests, runtime_seconds),
-                    **monitor.summary(),
-                })
-                gpu_samples.extend({**identity, **sample} for sample in monitor.samples)
-        benchmark_scores = (
-            scores_by_model[campaign.model_names[0]]
-            if len(campaign.model_names) == 1
-            else scores_by_model
+        from quantscope_bench.statistics import write_repetition_statistics
+        write_repetition_statistics(
+            arguments.output_dir / "statistics", results,
+            performance_summaries, benchmark_gpu_energy,
         )
+        from quantscope_bench.temporal_quality import write_temporal_quality
+        write_temporal_quality(
+            arguments.output_dir / "instrumentation", performance_requests, benchmark_windows
+        )
+        validation = validate_run(results, generation_traces, performance_requests,
+                                  benchmark_windows, benchmark_gpu_energy)
+        # Preserve the legacy metadata shape for a single repetition.
+        if repetitions == 1:
+            single_scores = {name: runs["run-1"] for name, runs in scores_by_model.items()}
+            benchmark_scores = (
+                single_scores[campaign.model_names[0]]
+                if len(campaign.model_names) == 1 else single_scores
+            )
+        else:
+            benchmark_scores = scores_by_model
         benchmark_metadata = {"benchmark_scores": benchmark_scores}
         LOGGER.info("Writing benchmark artifacts to %s", arguments.output_dir)
         write_run_artifacts(
@@ -201,6 +233,7 @@ def _run_campaign(
                 "campaign": campaign_document,
                 "models": list(campaign.model_names),
                 "platform": collect_platform_inventory(),
+                "provenance": collect_provenance(models, list(campaign.model_names)),
                 **benchmark_metadata,
             },
             results,
@@ -208,6 +241,9 @@ def _run_campaign(
         )
         write_instrumentation_artifacts(
             arguments.output_dir / "instrumentation", generation_traces, benchmark_windows
+        )
+        write_data_quality_artifacts(
+            arguments.output_dir / "instrumentation", validation, benchmark_gpu_energy
         )
         if performance_summaries:
             write_performance_artifacts(

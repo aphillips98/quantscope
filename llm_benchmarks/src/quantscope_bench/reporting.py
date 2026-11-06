@@ -108,13 +108,14 @@ def write_run_artifacts(
 
 def _summaries(results: list[SampleResult]) -> list[dict[str, Any]]:
     LOGGER.debug("Aggregating summaries from %d sample results", len(results))
-    grouped: dict[tuple[str, str, str, str], list[SampleResult]] = {}
+    grouped: dict[tuple[str, str, str, str, str], list[SampleResult]] = {}
     for result in results:
         grouped.setdefault(
-            (result.model_name, result.benchmark, result.task, result.scoring_method), []
+            (result.run_id, result.model_name, result.benchmark, result.task, result.scoring_method), []
         ).append(result)
     return [
         {
+            "run_id": run_id,
             "model_name": model_name,
             "benchmark": benchmark,
             "task": task,
@@ -124,7 +125,7 @@ def _summaries(results: list[SampleResult]) -> list[dict[str, Any]]:
             "accuracy": sum(item.correct for item in group) / len(group),
             "mean_latency_seconds": sum(item.latency_seconds for item in group) / len(group),
         }
-        for (model_name, benchmark, task, scoring_method), group in sorted(grouped.items())
+        for (run_id, model_name, benchmark, task, scoring_method), group in sorted(grouped.items())
     ]
 
 
@@ -162,3 +163,14 @@ def write_instrumentation_artifacts(
         for record in traces:
             stream.write(json.dumps(record, sort_keys=True) + "\n")
     _write_json(output_dir / "benchmark_windows.json", {"windows": windows})
+
+
+def write_data_quality_artifacts(output_dir: Path, validation: dict[str, Any],
+                                 energy: list[dict[str, Any]]) -> None:
+    """Write additive diagnostics; existing output schemas remain unchanged."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(output_dir / "validation.json", validation)
+    _write_csv(output_dir / "benchmark_gpu_energy.csv", energy, [
+        "run_id", "model_name", "benchmark", "gpu_uuid", "energy_joules",
+        "mean_power_watts", "coverage_complete", "sample_count", "energy_scope",
+    ] if not energy else None)

@@ -56,6 +56,8 @@ def run_deepeval_campaign(
                 "benchmark": name, "model_name": model_name,
                 "start_timestamp_ns": started_ns, "end_timestamp_ns": time.time_ns(),
                 "duration_seconds": time.perf_counter() - started,
+                "start_monotonic_seconds": started,
+                "end_monotonic_seconds": time.perf_counter(),
             })
         metadata["benchmark_scores"][name] = float(benchmark.overall_score)
         benchmark_results = _normalize_predictions(

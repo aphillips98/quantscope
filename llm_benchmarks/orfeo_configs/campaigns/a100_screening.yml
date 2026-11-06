@@ -1,21 +1,22 @@
 version: 1
 name: a100
 models:
-  - mistral-7b-instruct-v0.3-q8_0
+- mistral-7b-instruct-v0.3-q8_0
 hardware_profile: a100
 repetitions: 1
 seed: 42
 capture_predictions: true
-scoring: [exact_match]
+scoring:
+- exact_match
 benchmarks:
   mmlu:
     shots: 5
-    tasks: [high_school_computer_science]
-    max_sample: 5
+    tasks:
+    - high_school_computer_science
   hellaswag:
     shots: 5
-    tasks: [applying_sunscreen]
-    max_sample: 5
+    tasks:
+    - applying_sunscreen
 telemetry:
   enabled: true
   require_energy: false
@@ -23,7 +24,7 @@ telemetry:
 llamacpp:
   verbose: false
 profiling:
-  enabled: true
+  enabled: false
   mode: daemon
   library_path: ${HOME}/.local/programs/A100/nvidia-profiling/lib/nvidia-process-metrics/libnvidia-process-metrics.so
   launcher: nvidia-process-metrics-launcher
